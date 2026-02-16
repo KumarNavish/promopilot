@@ -1,1 +1,0 @@
-{"root":["./src/main.tsx","./src/vite-env.d.ts","./src/api/client.ts","./src/components/controls.tsx","./src/components/doseresponsechart.tsx","./src/components/errorboundary.tsx","./src/components/policycard.tsx","./src/components/togglepill.tsx","./src/pages/home.tsx","./tests/e2e.spec.ts","./playwright.config.ts"],"version":"5.9.3"}
