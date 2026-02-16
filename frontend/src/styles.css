@@ -1,0 +1,277 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap");
+
+:root {
+  --bg: #f2efe5;
+  --card: #fffdf8;
+  --ink: #1b1f24;
+  --muted: #5c6570;
+  --accent: #006d77;
+  --accent-soft: #9ed8db;
+  --line: #cdd3d4;
+  --whisker: #bfc7c8;
+  --danger: #9c2f2f;
+  --shadow: 0 10px 30px rgba(26, 33, 41, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(90% 65% at 90% 0%, rgba(0, 109, 119, 0.16), transparent 70%),
+    linear-gradient(180deg, #efe8d9, var(--bg));
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.page-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 20px 44px;
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+h1 {
+  margin: 6px 0;
+  font-family: "Space Grotesk", "Avenir Next", sans-serif;
+  font-size: clamp(1.8rem, 3vw, 2.4rem);
+}
+
+.hero-copy {
+  margin: 0;
+  color: var(--muted);
+}
+
+.panel {
+  background: var(--card);
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+.controls-panel {
+  padding: 18px;
+}
+
+.controls-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.field select,
+.field input[type="range"],
+.chart-header select {
+  border: 1px solid rgba(34, 44, 55, 0.18);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+  font-size: 0.94rem;
+}
+
+.button-primary,
+.button-secondary {
+  border: none;
+  border-radius: 11px;
+  padding: 10px 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 140ms ease, opacity 140ms ease;
+}
+
+.button-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.button-secondary {
+  background: #eef4f5;
+  color: #243038;
+}
+
+.button-primary:disabled,
+.button-secondary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.button-primary:not(:disabled):hover,
+.button-secondary:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.results-stack {
+  margin-top: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.policy-card {
+  padding: 14px;
+}
+
+.policy-card.highlight {
+  outline: 2px solid var(--accent-soft);
+}
+
+.policy-card-header h2 {
+  margin: 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.15rem;
+}
+
+.policy-card-header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.policy-table-wrap {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 9px 8px;
+  border-bottom: 1px solid #ececec;
+  white-space: nowrap;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.subtle {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.row-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.toggle-pill {
+  display: inline-flex;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 999px;
+  padding: 4px;
+  background: #fff;
+}
+
+.toggle-pill button {
+  border: none;
+  background: transparent;
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.toggle-pill button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.chart-panel {
+  padding: 14px;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.chart-header h3 {
+  margin: 0;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.axis-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.comparison-banner {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #dff2ee;
+  color: #15463f;
+  font-size: 0.92rem;
+}
+
+.error-line {
+  margin: 12px 0 0;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.footer-note {
+  margin-top: 20px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+@media (max-width: 980px) {
+  .controls-grid,
+  .cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .row-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
