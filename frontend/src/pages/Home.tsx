@@ -35,23 +35,30 @@ function exportPolicy(response: RecommendResponse | null): void {
 }
 
 function summarizeComparison(naive: RecommendResponse, dr: RecommendResponse, objective: Objective): string {
-  const total = (response: RecommendResponse): number =>
-    response.segments.reduce((acc, segment) => {
-      return acc + (objective === "bookings" ? segment.expected_bookings_per_10k : segment.expected_net_value_per_10k);
-    }, 0);
+  const totalBookings = (response: RecommendResponse): number =>
+    response.segments.reduce((acc, segment) => acc + segment.expected_bookings_per_10k, 0);
+  const totalNetValue = (response: RecommendResponse): number =>
+    response.segments.reduce((acc, segment) => acc + segment.expected_net_value_per_10k, 0);
 
   const avgDiscount = (response: RecommendResponse): number =>
     response.segments.reduce((acc, segment) => acc + segment.recommended_discount_pct, 0) /
     Math.max(response.segments.length, 1);
 
-  const drTotal = total(dr);
-  const naiveTotal = total(naive);
-  const delta = drTotal - naiveTotal;
+  const primaryDelta =
+    objective === "bookings"
+      ? totalBookings(dr) - totalBookings(naive)
+      : totalNetValue(dr) - totalNetValue(naive);
+  const bookingsDelta = totalBookings(dr) - totalBookings(naive);
+  const netValueDelta = totalNetValue(dr) - totalNetValue(naive);
   const discountDelta = avgDiscount(dr) - avgDiscount(naive);
+  const primaryLabel = objective === "bookings" ? "bookings" : "net value";
 
-  return `Counterfactual vs Naive: ${delta.toFixed(1)} ${objective === "bookings" ? "bookings" : "value"} and ${discountDelta.toFixed(
-    1
-  )}% avg discount.`;
+  return [
+    `Bias-adjusted policy vs naive: ${primaryDelta >= 0 ? "+" : ""}${primaryDelta.toFixed(1)} ${primaryLabel}.`,
+    `Bookings ${bookingsDelta >= 0 ? "+" : ""}${bookingsDelta.toFixed(1)} per 10k.`,
+    `Net value ${netValueDelta >= 0 ? "+" : ""}${netValueDelta.toFixed(0)} per 10k.`,
+    `Avg discount ${discountDelta >= 0 ? "+" : ""}${discountDelta.toFixed(1)} pp.`
+  ].join(" ");
 }
 
 export function Home(): JSX.Element {
@@ -111,11 +118,26 @@ export function Home(): JSX.Element {
 
   return (
     <main className="page-shell">
-      <header className="hero">
-        <div>
+      <header className="hero panel">
+        <div className="hero-copy-block">
           <p className="eyebrow">PromoPilot</p>
           <h1>Counterfactual Discount Optimizer</h1>
-          <p className="hero-copy">Policy recommendations per 10k users from logged promotion data.</p>
+          <p className="hero-copy">
+            Choose discounts by segment while avoiding targeting bias from historical promotions.
+          </p>
+        </div>
+        <div className="hero-context">
+          <p>
+            <strong>Problem</strong> Historical discounts were targeted, so raw conversion can make larger discounts look
+            better than they are.
+          </p>
+          <p>
+            <strong>Approach</strong> Compare naive observed outcomes against a bias-adjusted counterfactual policy under
+            the same discount cap.
+          </p>
+          <p>
+            <strong>Outcome</strong> Get a policy that protects margin while preserving or improving bookings.
+          </p>
         </div>
       </header>
 
@@ -129,6 +151,24 @@ export function Home(): JSX.Element {
         onGenerate={handleGenerate}
         loading={loading}
       />
+
+      <section className="panel narrative-panel">
+        <h2>How to read this demo</h2>
+        <div className="narrative-grid">
+          <article>
+            <p className="narrative-title">1. Set your business target</p>
+            <p>Pick bookings or net value, set a max discount cap, and optionally segment your users.</p>
+          </article>
+          <article>
+            <p className="narrative-title">2. Compare two policy choices</p>
+            <p>Naive uses raw historical outcomes. Bias-adjusted estimates what each discount would do if assigned fairly.</p>
+          </article>
+          <article>
+            <p className="narrative-title">3. Use the delta as your decision signal</p>
+            <p>The hero banner quantifies incremental outcome and discount pressure per 10k users.</p>
+          </article>
+        </div>
+      </section>
 
       {error ? (
         <p className="error-line" data-testid="error-line">
@@ -177,7 +217,12 @@ export function Home(): JSX.Element {
             <DoseResponseChart objective={objective} doseResponse={activeResponse.dose_response} />
           ) : null}
         </section>
-      ) : null}
+      ) : (
+        <section className="panel empty-state">
+          <p className="narrative-title">No policy generated yet</p>
+          <p>Select controls above and click Generate policy to compare naive and bias-adjusted recommendations.</p>
+        </section>
+      )}
 
       <footer className="footer-note">
         Methodology available in API docs: propensity + outcome modeling with doubly robust estimation.

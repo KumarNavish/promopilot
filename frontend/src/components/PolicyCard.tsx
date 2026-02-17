@@ -22,15 +22,22 @@ export function PolicyCard({ method, response, objective, highlighted = false }:
     return acc + (objective === "bookings" ? segment.expected_bookings_per_10k : segment.expected_net_value_per_10k);
   }, 0);
 
-  const methodLabel = method === "dr" ? "Counterfactual policy" : "Naive policy";
+  const methodLabel = method === "dr" ? "Bias-adjusted counterfactual policy" : "Naive observed policy";
+  const methodNote =
+    method === "dr"
+      ? "Adjusts for targeted promotion patterns before estimating impact."
+      : "Uses raw historical outcomes without correcting for targeting bias.";
+  const baselineDiscount = response.baseline.discount_pct;
 
   return (
     <section className={`panel policy-card ${highlighted ? "highlight" : ""}`} data-testid={`policy-card-${method}`}>
       <header className="policy-card-header">
         <h2>{methodLabel}</h2>
         <p>
-          Avg discount <strong>{avgDiscount.toFixed(1)}%</strong> | Primary objective <strong>{formatNumber(totalPrimary)}</strong>
+          Avg discount <strong>{avgDiscount.toFixed(1)}%</strong> | Baseline <strong>{baselineDiscount}%</strong> | Primary
+          objective <strong>{formatNumber(totalPrimary)}</strong>
         </p>
+        <p className="method-note">{methodNote}</p>
       </header>
 
       <div className="policy-table-wrap">

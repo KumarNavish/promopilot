@@ -14,7 +14,7 @@ export function TogglePill({ value, onChange }: TogglePillProps): JSX.Element {
         data-testid="toggle-naive"
         onClick={() => onChange("naive")}
       >
-        Naive
+        Naive observed
       </button>
       <button
         type="button"
@@ -22,7 +22,7 @@ export function TogglePill({ value, onChange }: TogglePillProps): JSX.Element {
         data-testid="toggle-dr"
         onClick={() => onChange("dr")}
       >
-        Counterfactual (DR)
+        Bias-adjusted
       </button>
     </div>
   );
