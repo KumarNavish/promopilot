@@ -7,6 +7,7 @@ import {
   SegmentBy,
   recommendPolicy
 } from "../api/client";
+import { BeforeAfterStrip } from "../components/BeforeAfterStrip";
 import { Controls } from "../components/Controls";
 import { DoseResponseChart } from "../components/DoseResponseChart";
 import { PolicyCard } from "../components/PolicyCard";
@@ -308,6 +309,8 @@ export function Home(): JSX.Element {
               Export policy JSON
             </button>
           </div>
+
+          {scorecard ? <BeforeAfterStrip objective={objective} naive={scorecard.naive} dr={scorecard.dr} /> : null}
 
           {activeResponse ? (
             <DoseResponseChart objective={objective} doseResponse={activeResponse.dose_response} />

@@ -309,6 +309,112 @@ th {
   gap: 12px;
 }
 
+.before-after-panel {
+  padding: 14px;
+  border: 1px solid rgba(7, 77, 84, 0.15);
+  background:
+    radial-gradient(circle at 95% 8%, rgba(0, 109, 119, 0.12), transparent 34%),
+    linear-gradient(180deg, #fbfefd, #f4fbf9);
+}
+
+.before-after-head h3 {
+  margin: 4px 0 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.12rem;
+  color: #0f3f48;
+}
+
+.before-after-columns {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.strip-card {
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 11px;
+  background: #fff;
+}
+
+.strip-before {
+  background: linear-gradient(180deg, #fff8f6, #fff);
+}
+
+.strip-after {
+  background: linear-gradient(180deg, #f1fbf8, #fff);
+}
+
+.strip-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.strip-meta {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.strip-row {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.strip-row span {
+  font-size: 0.78rem;
+  color: #4f5f66;
+}
+
+.strip-track {
+  height: 9px;
+  border-radius: 999px;
+  background: #e6edef;
+  overflow: hidden;
+}
+
+.strip-fill {
+  height: 100%;
+  width: 0;
+  transition: width 760ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.strip-fill.objective.before {
+  background: #8d98a2;
+}
+
+.strip-fill.objective.after {
+  background: #008693;
+}
+
+.strip-fill.discount.before {
+  background: #ca6f50;
+}
+
+.strip-fill.discount.after {
+  background: #2f8f62;
+}
+
+.strip-delta {
+  margin: 11px 0 0;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: #ebf7f4;
+  color: #225058;
+  font-size: 0.86rem;
+}
+
+.strip-delta strong {
+  color: #0e3f47;
+  font-weight: 700;
+}
+
 .toggle-pill {
   display: inline-flex;
   border: 1px solid rgba(0, 0, 0, 0.12);
@@ -395,7 +501,8 @@ th {
   .controls-grid,
   .cards-grid,
   .wow-metrics,
-  .method-summary-grid {
+  .method-summary-grid,
+  .before-after-columns {
     grid-template-columns: 1fr;
   }
 
