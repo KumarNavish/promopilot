@@ -9,6 +9,7 @@ interface ControlsProps {
   onSegmentByChange: (value: SegmentBy) => void;
   onGenerate: () => void;
   loading: boolean;
+  hasResults: boolean;
 }
 
 export function Controls({
@@ -19,13 +20,15 @@ export function Controls({
   onMaxDiscountChange,
   onSegmentByChange,
   onGenerate,
-  loading
+  loading,
+  hasResults
 }: ControlsProps): JSX.Element {
   return (
     <section className="panel controls-panel" aria-label="Controls">
+      <p className="controls-intro">Set the objective and constraints, then recompute to compare policy behavior.</p>
       <div className="controls-grid">
         <label className="field">
-          <span>Objective</span>
+          <span>Business objective</span>
           <select
             data-testid="objective-select"
             value={objective}
@@ -37,7 +40,7 @@ export function Controls({
         </label>
 
         <label className="field">
-          <span>Segmentation</span>
+          <span>User segmentation</span>
           <select
             data-testid="segment-select"
             value={segmentBy}
@@ -51,7 +54,7 @@ export function Controls({
         </label>
 
         <label className="field">
-          <span>Max discount: {maxDiscountPct}%</span>
+          <span>Max allowed discount: {maxDiscountPct}%</span>
           <input
             data-testid="discount-slider"
             type="range"
@@ -71,7 +74,7 @@ export function Controls({
         onClick={onGenerate}
         disabled={loading}
       >
-        {loading ? "Computing..." : "Generate policy"}
+        {loading ? "Computing..." : hasResults ? "Recompute policy" : "Generate policy"}
       </button>
     </section>
   );

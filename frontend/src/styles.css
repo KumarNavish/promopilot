@@ -7,6 +7,7 @@
   --muted: #5c6570;
   --accent: #006d77;
   --accent-soft: #9ed8db;
+  --ink-strong: #092f34;
   --line: #cdd3d4;
   --whisker: #bfc7c8;
   --danger: #9c2f2f;
@@ -83,43 +84,11 @@ h1 {
   color: var(--muted);
 }
 
-.narrative-panel {
-  margin-top: 14px;
-  padding: 14px 16px;
-}
-
-.narrative-panel h2 {
-  margin: 0;
-  font-family: "Space Grotesk", sans-serif;
-  font-size: 1.05rem;
-}
-
-.narrative-grid {
-  margin-top: 10px;
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.narrative-grid article {
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 12px;
-  padding: 11px;
-  background: #fff;
-}
-
 .narrative-title {
   margin: 0;
   font-size: 0.9rem;
   font-weight: 600;
   color: #1f2a32;
-}
-
-.narrative-grid article p {
-  margin: 6px 0 0;
-  color: var(--muted);
-  font-size: 0.88rem;
-  line-height: 1.38;
 }
 
 .panel {
@@ -131,6 +100,12 @@ h1 {
 
 .controls-panel {
   padding: 18px;
+}
+
+.controls-intro {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .controls-grid {
@@ -193,6 +168,76 @@ h1 {
   margin-top: 16px;
   display: grid;
   gap: 14px;
+}
+
+.wow-panel {
+  padding: 16px;
+  background:
+    radial-gradient(circle at 94% 12%, rgba(0, 109, 119, 0.14), transparent 36%),
+    linear-gradient(180deg, #f8fffd, #eef8f6 60%, #f6fbfa 100%);
+}
+
+.wow-panel h2 {
+  margin: 4px 0 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: clamp(1.2rem, 2.3vw, 1.65rem);
+  color: var(--ink-strong);
+}
+
+.wow-subtitle {
+  margin: 8px 0 0;
+  color: #28565d;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.wow-metrics {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.wow-metrics article {
+  border: 1px solid rgba(7, 77, 84, 0.2);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 10px 11px;
+}
+
+.metric-label {
+  margin: 0;
+  color: #3f5458;
+  font-size: 0.8rem;
+}
+
+.metric-value {
+  margin: 5px 0 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.5rem;
+  line-height: 1.05;
+  color: #043f46;
+}
+
+.method-summary-grid {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.method-summary-grid article {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+  padding: 10px 11px;
+}
+
+.method-summary-grid article p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.35;
 }
 
 .cards-grid {
@@ -312,10 +357,16 @@ th {
   margin: 0;
   padding: 11px 12px;
   border-radius: 10px;
-  background: #dff2ee;
-  color: #15463f;
+  background: #ebf7f4;
+  color: #0f3f48;
   font-size: 0.92rem;
   line-height: 1.42;
+}
+
+.loading-line {
+  margin: 12px 0 0;
+  color: #305057;
+  font-weight: 600;
 }
 
 .error-line {
@@ -343,7 +394,8 @@ th {
 @media (max-width: 980px) {
   .controls-grid,
   .cards-grid,
-  .narrative-grid {
+  .wow-metrics,
+  .method-summary-grid {
     grid-template-columns: 1fr;
   }
 

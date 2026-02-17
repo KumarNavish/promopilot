@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ApiError,
   Method,
@@ -18,6 +18,12 @@ interface UiError {
 }
 
 const DEFAULT_MAX_DISCOUNT = 15;
+
+interface MethodRollup {
+  bookings: number;
+  netValue: number;
+  avgDiscount: number;
+}
 
 function exportPolicy(response: RecommendResponse | null): void {
   if (!response) {
@@ -61,6 +67,27 @@ function summarizeComparison(naive: RecommendResponse, dr: RecommendResponse, ob
   ].join(" ");
 }
 
+function rollupMethod(response: RecommendResponse): MethodRollup {
+  const count = Math.max(response.segments.length, 1);
+  const sumBookings = response.segments.reduce((acc, segment) => acc + segment.expected_bookings_per_10k, 0);
+  const sumNetValue = response.segments.reduce((acc, segment) => acc + segment.expected_net_value_per_10k, 0);
+  const sumDiscount = response.segments.reduce((acc, segment) => acc + segment.recommended_discount_pct, 0);
+
+  return {
+    bookings: sumBookings / count,
+    netValue: sumNetValue / count,
+    avgDiscount: sumDiscount / count
+  };
+}
+
+function signed(value: number, digits = 1): string {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
+}
+
+function formatInteger(value: number): string {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
+}
+
 export function Home(): JSX.Element {
   const [objective, setObjective] = useState<Objective>("bookings");
   const [maxDiscountPct, setMaxDiscountPct] = useState<number>(DEFAULT_MAX_DISCOUNT);
@@ -69,6 +96,7 @@ export function Home(): JSX.Element {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<Partial<Record<Method, RecommendResponse>>>({});
   const [error, setError] = useState<UiError | null>(null);
+  const [hasAutoRun, setHasAutoRun] = useState(false);
 
   const hasResults = Boolean(results.naive || results.dr);
   const activeResponse = results[activeMethod] ?? results.dr ?? results.naive ?? null;
@@ -80,7 +108,41 @@ export function Home(): JSX.Element {
     return "";
   }, [objective, results.dr, results.naive]);
 
-  async function handleGenerate(): Promise<void> {
+  const scorecard = useMemo(() => {
+    if (!results.naive || !results.dr) {
+      return null;
+    }
+
+    const naive = rollupMethod(results.naive);
+    const dr = rollupMethod(results.dr);
+    return {
+      naive,
+      dr,
+      bookingsDelta: dr.bookings - naive.bookings,
+      netValueDelta: dr.netValue - naive.netValue,
+      discountDelta: dr.avgDiscount - naive.avgDiscount
+    };
+  }, [results.dr, results.naive]);
+
+  const wowHeadline = useMemo(() => {
+    if (!scorecard) {
+      return "";
+    }
+
+    const objectiveDelta = objective === "bookings" ? scorecard.bookingsDelta : scorecard.netValueDelta;
+    const objectiveLabel = objective === "bookings" ? "bookings" : "net value";
+    const naiveOverDiscount = scorecard.naive.avgDiscount - scorecard.dr.avgDiscount;
+
+    if (naiveOverDiscount > 0 && objectiveDelta >= 0) {
+      return `Bias-adjusted wins: ${signed(objectiveDelta, objective === "bookings" ? 1 : 0)} ${objectiveLabel} while cutting avg discount by ${naiveOverDiscount.toFixed(
+        1
+      )} pp.`;
+    }
+
+    return `Bias-adjusted shifts outcome by ${signed(objectiveDelta, objective === "bookings" ? 1 : 0)} ${objectiveLabel} vs naive.`;
+  }, [objective, scorecard]);
+
+  const handleGenerate = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError(null);
 
@@ -114,7 +176,16 @@ export function Home(): JSX.Element {
     } finally {
       setLoading(false);
     }
-  }
+  }, [maxDiscountPct, objective, segmentBy]);
+
+  useEffect(() => {
+    if (hasAutoRun) {
+      return;
+    }
+
+    setHasAutoRun(true);
+    void handleGenerate();
+  }, [handleGenerate, hasAutoRun]);
 
   return (
     <main className="page-shell">
@@ -122,21 +193,20 @@ export function Home(): JSX.Element {
         <div className="hero-copy-block">
           <p className="eyebrow">PromoPilot</p>
           <h1>Counterfactual Discount Optimizer</h1>
-          <p className="hero-copy">
-            Choose discounts by segment while avoiding targeting bias from historical promotions.
-          </p>
+          <p className="hero-copy">One click shows how naive discounting burns margin and how bias-adjusted policy fixes it.</p>
         </div>
         <div className="hero-context">
           <p>
-            <strong>Problem</strong> Historical discounts were targeted, so raw conversion can make larger discounts look
-            better than they are.
+            <strong>Problem</strong> Discounts were historically targeted to higher-intent users, so observed conversion
+            overstates the value of bigger discounts.
           </p>
           <p>
-            <strong>Approach</strong> Compare naive observed outcomes against a bias-adjusted counterfactual policy under
-            the same discount cap.
+            <strong>Method</strong> Run naive observed policy and counterfactual bias-adjusted policy side by side on the
+            same objective and constraint.
           </p>
           <p>
-            <strong>Outcome</strong> Get a policy that protects margin while preserving or improving bookings.
+            <strong>Why better</strong> Use the decision signal below to see incremental value and discount efficiency in
+            seconds.
           </p>
         </div>
       </header>
@@ -150,25 +220,10 @@ export function Home(): JSX.Element {
         onSegmentByChange={setSegmentBy}
         onGenerate={handleGenerate}
         loading={loading}
+        hasResults={hasResults}
       />
 
-      <section className="panel narrative-panel">
-        <h2>How to read this demo</h2>
-        <div className="narrative-grid">
-          <article>
-            <p className="narrative-title">1. Set your business target</p>
-            <p>Pick bookings or net value, set a max discount cap, and optionally segment your users.</p>
-          </article>
-          <article>
-            <p className="narrative-title">2. Compare two policy choices</p>
-            <p>Naive uses raw historical outcomes. Bias-adjusted estimates what each discount would do if assigned fairly.</p>
-          </article>
-          <article>
-            <p className="narrative-title">3. Use the delta as your decision signal</p>
-            <p>The hero banner quantifies incremental outcome and discount pressure per 10k users.</p>
-          </article>
-        </div>
-      </section>
+      {loading && !hasResults ? <p className="loading-line">Running first simulation for you...</p> : null}
 
       {error ? (
         <p className="error-line" data-testid="error-line">
@@ -179,6 +234,47 @@ export function Home(): JSX.Element {
 
       {hasResults ? (
         <section className="results-stack" data-testid="results-block">
+          {scorecard ? (
+            <section className="panel wow-panel" data-testid="wow-panel">
+              <p className="eyebrow">Decision Signal</p>
+              <h2>{wowHeadline}</h2>
+              <p className="wow-subtitle">
+                Compare methods on the same segment setup and max discount. Metrics shown are mean expected impact per
+                segment cohort of 10k users.
+              </p>
+              <div className="wow-metrics">
+                <article>
+                  <p className="metric-label">Bookings delta (DR - Naive)</p>
+                  <p className="metric-value">{signed(scorecard.bookingsDelta)}</p>
+                </article>
+                <article>
+                  <p className="metric-label">Net value delta (DR - Naive)</p>
+                  <p className="metric-value">{signed(scorecard.netValueDelta, 0)}</p>
+                </article>
+                <article>
+                  <p className="metric-label">Avg discount delta (DR - Naive)</p>
+                  <p className="metric-value">{signed(scorecard.discountDelta)}</p>
+                </article>
+              </div>
+              <div className="method-summary-grid">
+                <article>
+                  <p className="narrative-title">Naive observed</p>
+                  <p>
+                    Bookings {formatInteger(scorecard.naive.bookings)} | Net value {formatInteger(scorecard.naive.netValue)} |
+                    Avg discount {scorecard.naive.avgDiscount.toFixed(1)}%
+                  </p>
+                </article>
+                <article>
+                  <p className="narrative-title">Bias-adjusted</p>
+                  <p>
+                    Bookings {formatInteger(scorecard.dr.bookings)} | Net value {formatInteger(scorecard.dr.netValue)} | Avg
+                    discount {scorecard.dr.avgDiscount.toFixed(1)}%
+                  </p>
+                </article>
+              </div>
+            </section>
+          ) : null}
+
           {comparisonText ? <p className="comparison-banner">{comparisonText}</p> : null}
 
           <div className="cards-grid">
@@ -220,7 +316,7 @@ export function Home(): JSX.Element {
       ) : (
         <section className="panel empty-state">
           <p className="narrative-title">No policy generated yet</p>
-          <p>Select controls above and click Generate policy to compare naive and bias-adjusted recommendations.</p>
+          <p>Generate policy to compare naive and bias-adjusted recommendations.</p>
         </section>
       )}
 
