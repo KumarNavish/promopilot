@@ -25,6 +25,10 @@ interface QueueTimeline {
   sloThreshold: number;
   naiveBreachMinute: number | null;
   aiBreachMinute: number | null;
+  naiveArrivalPerMin: number;
+  aiArrivalPerMin: number;
+  capacityPerMin: number;
+  initialBacklog: number;
 }
 
 type PolicyMap = Record<string, number>;
@@ -53,7 +57,6 @@ interface ImpactScore {
   successLift: number;
   incidentsAvoided: number;
   riskCostImpactUsd: number;
-  onCallPagesAvoided: number;
   aiPolicy: PolicyMap;
   naivePolicy: PolicyMap;
   aiProjection: PolicyProjection;
@@ -63,8 +66,7 @@ interface ImpactScore {
 const DEMO_SEGMENT_BY: SegmentBy = "task_domain";
 const DEFAULT_WEEKLY_REQUESTS = 5_000_000;
 const DEFAULT_INCIDENT_COST_USD = 2500;
-const HOURS_PER_INCIDENT = 2.2;
-const INCIDENTS_PER_ONCALL_PAGE = 14;
+const MINUTES_PER_WEEK = 7 * 24 * 60;
 const TIMELINE_TOTAL_MINUTES = 12;
 const TIMELINE_TICK_MS = 420;
 
@@ -204,30 +206,30 @@ function buildPolicyDiffLine(naivePolicy: PolicyMap, aiPolicy: PolicyMap): strin
   return `Policy changes vs naive: ${changed.join(" | ")}.`;
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function buildQueueTimeline(params: { naiveIncidents: number; aiIncidents: number }): QueueTimeline {
-  const { naiveIncidents, aiIncidents } = params;
+function buildQueueTimeline(params: {
+  naiveWeeklyIncidents: number;
+  aiWeeklyIncidents: number;
+  capacityMultiplier: number;
+}): QueueTimeline {
+  const { naiveWeeklyIncidents, aiWeeklyIncidents, capacityMultiplier } = params;
   const minutes = Array.from({ length: TIMELINE_TOTAL_MINUTES + 1 }, (_, minute) => minute);
-  const gapRatio = clamp((naiveIncidents - aiIncidents) / Math.max(naiveIncidents, 1), -0.6, 0.6);
-  const volumeScale = clamp(Math.log10(Math.max(naiveIncidents, aiIncidents, 1) + 10), 1.8, 7.5);
+  const naiveArrivalPerMin = naiveWeeklyIncidents / MINUTES_PER_WEEK;
+  const aiArrivalPerMin = aiWeeklyIncidents / MINUTES_PER_WEEK;
+  const capacityPerMin = Math.max(0.0001, naiveArrivalPerMin * capacityMultiplier);
+  const initialBacklog = Math.max(1, Math.round(Math.max(naiveArrivalPerMin, aiArrivalPerMin) * 3));
+  const sloThreshold = Math.max(5, Math.round(initialBacklog + Math.max(naiveArrivalPerMin, aiArrivalPerMin) * 10));
 
-  let naiveQueue = 16 + volumeScale * 5.2;
-  let aiQueue = Math.max(6, naiveQueue - 4 * gapRatio);
-  const naiveSlope = 1.4 + volumeScale * 0.4;
-  const aiSlope = naiveSlope - 2.4 - gapRatio * 5;
-  const sloThreshold = Math.round(clamp(30 + volumeScale * 2.6, 28, 48));
+  let naiveQueue = initialBacklog;
+  let aiQueue = initialBacklog;
 
   const naiveQueueSeries: number[] = [];
   const aiQueueSeries: number[] = [];
 
   for (let minute = 0; minute <= TIMELINE_TOTAL_MINUTES; minute += 1) {
-    naiveQueue = Math.max(0, naiveQueue + naiveSlope + Math.sin(minute / 2.2));
-    aiQueue = Math.max(0, aiQueue + aiSlope + 0.55 * Math.sin((minute + 1) / 2.6));
     naiveQueueSeries.push(naiveQueue);
     aiQueueSeries.push(aiQueue);
+    naiveQueue = Math.max(0, naiveQueue + naiveArrivalPerMin - capacityPerMin);
+    aiQueue = Math.max(0, aiQueue + aiArrivalPerMin - capacityPerMin);
   }
 
   const naiveBreachIndex = naiveQueueSeries.findIndex((value) => value >= sloThreshold);
@@ -239,7 +241,11 @@ function buildQueueTimeline(params: { naiveIncidents: number; aiIncidents: numbe
     aiQueue: aiQueueSeries,
     sloThreshold,
     naiveBreachMinute: naiveBreachIndex >= 0 ? naiveBreachIndex : null,
-    aiBreachMinute: aiBreachIndex >= 0 ? aiBreachIndex : null
+    aiBreachMinute: aiBreachIndex >= 0 ? aiBreachIndex : null,
+    naiveArrivalPerMin,
+    aiArrivalPerMin,
+    capacityPerMin,
+    initialBacklog
   };
 }
 
@@ -317,8 +323,7 @@ function exportPolicyBundle(params: {
     impact_vs_naive: {
       successful_outcomes: Math.round(score.successLift),
       incidents_avoided: Math.round(score.incidentsAvoided),
-      risk_cost_impact_usd: Math.round(score.riskCostImpactUsd),
-      oncall_pages_avoided: Math.round(score.onCallPagesAvoided)
+      risk_cost_impact_usd: Math.round(score.riskCostImpactUsd)
     },
     recommended_rules: policyToRules(score.aiPolicy),
     naive_reference_rules: policyToRules(score.naivePolicy)
@@ -339,6 +344,7 @@ export function Home(): JSX.Element {
   const [horizon, setHorizon] = useState<Horizon>("week");
   const [weeklyRequests, setWeeklyRequests] = useState<number>(DEFAULT_WEEKLY_REQUESTS);
   const [incidentCostUsd, setIncidentCostUsd] = useState<number>(DEFAULT_INCIDENT_COST_USD);
+  const [capacityMultiplier, setCapacityMultiplier] = useState<number>(1.0);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<{ naive?: RecommendResponse; dr?: RecommendResponse }>({});
   const [error, setError] = useState<UiError | null>(null);
@@ -423,35 +429,26 @@ export function Home(): JSX.Element {
     const successLift = aiProjection.successes - naiveProjection.successes;
     const incidentsAvoided = naiveProjection.incidents - aiProjection.incidents;
     const riskCostImpactUsd = naiveProjection.riskCostUsd - aiProjection.riskCostUsd;
-    const onCallPagesAvoided = incidentsAvoided / INCIDENTS_PER_ONCALL_PAGE;
 
     const policyPhrase = buildPolicyPhrase(aiPolicy);
     const incidentPhrase =
       incidentsAvoided >= 0
         ? `${formatInteger(incidentsAvoided)} fewer incidents`
         : `${formatInteger(Math.abs(incidentsAvoided))} additional incidents`;
-
-    const reclaimedHours = incidentsAvoided * HOURS_PER_INCIDENT;
-    const hoursPhrase =
-      reclaimedHours >= 0
-        ? `${formatInteger(reclaimedHours)} engineer-hours reclaimed`
-        : `${formatInteger(Math.abs(reclaimedHours))} extra engineer-hours consumed`;
-    const pagesPhrase =
-      onCallPagesAvoided >= 0
-        ? `${formatInteger(onCallPagesAvoided)} on-call pages avoided`
-        : `${formatInteger(Math.abs(onCallPagesAvoided))} additional on-call pages`;
+    const traceableMathLine = "Traceable math: incidents = incidents_per_10k x traffic/10k x horizon; risk cost = incidents x incident cost.";
 
     return {
       recommendationLine: `Ship now: ${policyPhrase}. In ${horizonConfig.label}, this bias-adjusted policy projects ${formatSignedInteger(
         successLift
       )} successful outcomes with ${incidentPhrase} vs naive targeting.`,
-      usefulnessLine: `Practical impact: ${formatSignedCurrency(riskCostImpactUsd)} incident-cost change and ${hoursPhrase}.`,
-      operationsLine: `Operations impact: ${pagesPhrase} (assumes ${INCIDENTS_PER_ONCALL_PAGE} incidents per page).`,
+      usefulnessLine: `Practical impact: ${formatSignedInteger(incidentsAvoided)} incidents and ${formatSignedCurrency(
+        riskCostImpactUsd
+      )} risk-cost impact vs naive.`,
+      operationsLine: traceableMathLine,
       policyDiffLine: buildPolicyDiffLine(naivePolicy, aiPolicy),
       successLift,
       incidentsAvoided,
       riskCostImpactUsd,
-      onCallPagesAvoided,
       aiPolicy,
       naivePolicy,
       aiProjection,
@@ -465,11 +462,15 @@ export function Home(): JSX.Element {
       return null;
     }
 
+    const naiveWeeklyIncidents = score.naiveProjection.incidents / horizonConfig.weeks;
+    const aiWeeklyIncidents = score.aiProjection.incidents / horizonConfig.weeks;
+
     return buildQueueTimeline({
-      naiveIncidents: score.naiveProjection.incidents,
-      aiIncidents: score.aiProjection.incidents
+      naiveWeeklyIncidents,
+      aiWeeklyIncidents,
+      capacityMultiplier
     });
-  }, [score]);
+  }, [capacityMultiplier, horizonConfig.weeks, score]);
 
   useEffect(() => {
     if (!queueTimeline) {
@@ -672,6 +673,21 @@ export function Home(): JSX.Element {
                 </button>
               </div>
             </div>
+            <div className="timeline-controls">
+              <label className="field-label" htmlFor="timeline-capacity">
+                Incident desk capacity: x{capacityMultiplier.toFixed(2)} of current load
+              </label>
+              <input
+                id="timeline-capacity"
+                type="range"
+                min={0.8}
+                max={1.2}
+                step={0.01}
+                value={capacityMultiplier}
+                onChange={(event) => setCapacityMultiplier(Number(event.target.value))}
+                data-testid="timeline-capacity-slider"
+              />
+            </div>
 
             <div className="timeline-rows" data-testid="timeline-chart">
               <article className="timeline-row naive" data-testid="naive-card">
@@ -714,6 +730,11 @@ export function Home(): JSX.Element {
             </div>
 
             <p className="timeline-footnote">Bars are unresolved incidents waiting in queue each minute.</p>
+            <p className="timeline-math" data-testid="timeline-math">
+              queue[t+1] = max(0, queue[t] + arrivals - capacity) where arrivals/min are {queueTimeline?.naiveArrivalPerMin.toFixed(2)} (naive)
+              and {queueTimeline?.aiArrivalPerMin.toFixed(2)} (bias-adjusted), capacity/min is {queueTimeline?.capacityPerMin.toFixed(2)}, and
+              initial backlog is {formatInteger(queueTimeline?.initialBacklog ?? 0)}.
+            </p>
             <input
               type="range"
               min={0}

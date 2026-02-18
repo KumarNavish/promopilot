@@ -13,7 +13,7 @@ test("auto demo run shows immersive usefulness and interactivity", async ({ page
   await expect(page.getByText("Minute-by-minute queue stabilization")).toBeVisible();
   await expect(page.getByTestId("timeline-minute")).toContainText("Minute");
   await expect(page.getByTestId("usefulness-line")).toContainText("Practical impact");
-  await expect(page.getByTestId("operations-line")).toContainText("Operations impact");
+  await expect(page.getByTestId("operations-line")).toContainText("Traceable math");
 
   const recommendationBefore = (await page.getByTestId("recommendation-line").textContent()) ?? "";
   await page.getByTestId("mode-throughput").click();
@@ -26,7 +26,9 @@ test("auto demo run shows immersive usefulness and interactivity", async ({ page
   await expect(page.getByTestId("incident-cost-slider")).toBeVisible();
   await expect(page.getByTestId("timeline-play-toggle")).toBeVisible();
   await expect(page.getByTestId("replay-simulation")).toBeVisible();
+  await expect(page.getByTestId("timeline-capacity-slider")).toBeVisible();
   await expect(page.getByTestId("timeline-scrubber")).toBeVisible();
+  await expect(page.getByTestId("timeline-math")).toContainText("queue[t+1]");
   await expect(page.getByTestId("timeline-verdict")).toContainText("Incident-room verdict");
   await expect(page.getByTestId("timeline-chart")).toBeVisible();
   await expect(page.getByTestId("apply-policy")).toBeVisible();
