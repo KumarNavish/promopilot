@@ -21,6 +21,8 @@ interface ImpactScore {
   successLiftWeekly: number;
   incidentsAvoidedWeekly: number;
   riskCostImpactUsdWeekly: number;
+  naiveRiskCostUsdWeekly: number;
+  drRiskCostUsdWeekly: number;
   latencyDeltaMs: number;
 }
 
@@ -30,7 +32,7 @@ const DEMO_MAX_POLICY_LEVEL = 4;
 
 const DEFAULT_WEEKLY_REQUESTS = 5_000_000;
 const DEFAULT_INCIDENT_COST_USD = 2500;
-const UI_VERSION = "value-v3";
+const UI_VERSION = "value-v4";
 
 function formatInteger(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -49,6 +51,14 @@ function formatSignedCurrency(value: number): string {
     maximumFractionDigits: 0
   }).format(Math.abs(value));
   return `${value >= 0 ? "+" : "-"}${abs}`;
+}
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0
+  }).format(value);
 }
 
 function rollupMethod(response: RecommendResponse): MethodRollup {
@@ -87,14 +97,16 @@ function buildPolicyPhrase(response: RecommendResponse): string {
 }
 
 function buildRecommendationLine(params: {
+  naive: RecommendResponse;
   dr: RecommendResponse;
   successLiftWeekly: number;
   incidentsAvoidedWeekly: number;
   latencyDeltaMs: number;
-  trafficWeekly: number;
+  riskCostImpactUsdWeekly: number;
 }): { tone: DecisionTone; text: string } {
-  const { dr, successLiftWeekly, incidentsAvoidedWeekly, latencyDeltaMs, trafficWeekly } = params;
-  const policyPhrase = buildPolicyPhrase(dr);
+  const { naive, dr, successLiftWeekly, incidentsAvoidedWeekly, latencyDeltaMs, riskCostImpactUsdWeekly } = params;
+  const naivePolicy = buildPolicyPhrase(naive);
+  const drPolicy = buildPolicyPhrase(dr);
 
   const successMagnitude = formatInteger(Math.abs(successLiftWeekly));
   const successWord = successLiftWeekly >= 0 ? "more" : "fewer";
@@ -113,12 +125,16 @@ function buildRecommendationLine(params: {
   }
 
   const latencyPhrase = latencyDeltaMs <= 0 ? `${Math.abs(latencyDeltaMs).toFixed(1)}ms faster` : `${latencyDeltaMs.toFixed(1)}ms slower`;
+  const policyTransition =
+    naivePolicy === drPolicy
+      ? `keep ${drPolicy} (but replace naive estimation with bias-adjusted estimation)`
+      : `switch from ${naivePolicy} to ${drPolicy}`;
 
   return {
     tone,
     text:
-      `${prefix}: use ${policyPhrase}; versus naive this projects ${successMagnitude} ${successWord} successful responses/week, ` +
-      `${incidentMagnitude} ${incidentWord} incidents/week, and ${latencyPhrase} latency at ${formatInteger(trafficWeekly)} requests/week.`
+      `${prefix}: ${policyTransition}; expected ${successMagnitude} ${successWord} successful responses/week, ` +
+      `${incidentMagnitude} ${incidentWord} incidents/week, ${formatSignedCurrency(riskCostImpactUsdWeekly)} weekly risk-cost delta, and ${latencyPhrase}.`
   };
 }
 
@@ -240,13 +256,16 @@ export function Home(): JSX.Element {
     const incidentsAvoidedWeekly = (naive.incidents - dr.incidents) * weeklyFactor;
     const latencyDeltaMs = dr.latency - naive.latency;
     const riskCostImpactUsdWeekly = incidentsAvoidedWeekly * incidentCostUsd;
+    const naiveRiskCostUsdWeekly = naive.incidents * weeklyFactor * incidentCostUsd;
+    const drRiskCostUsdWeekly = dr.incidents * weeklyFactor * incidentCostUsd;
 
     const recommendation = buildRecommendationLine({
+      naive: naiveResult,
       dr: drResult,
       successLiftWeekly,
       incidentsAvoidedWeekly,
       latencyDeltaMs,
-      trafficWeekly: weeklyRequests
+      riskCostImpactUsdWeekly
     });
 
     return {
@@ -255,6 +274,8 @@ export function Home(): JSX.Element {
       successLiftWeekly,
       incidentsAvoidedWeekly,
       riskCostImpactUsdWeekly,
+      naiveRiskCostUsdWeekly,
+      drRiskCostUsdWeekly,
       latencyDeltaMs
     };
   }, [naiveResult, drResult, weeklyRequests, incidentCostUsd]);
@@ -298,6 +319,33 @@ export function Home(): JSX.Element {
 
       {hasResults && score && naiveResult && drResult ? (
         <section className="panel result-panel" data-testid="results-block">
+          <section className="before-after-strip" data-testid="before-after-strip">
+            <article className="strip-col naive" data-testid="naive-card">
+              <p className="strip-label">Before: naive from biased logs</p>
+              <strong className="strip-policy" data-testid="naive-policy">
+                {buildPolicyPhrase(naiveResult)}
+              </strong>
+              <p className="strip-metric" data-testid="naive-risk-cost">
+                Incident cost/week: {formatCurrency(score.naiveRiskCostUsdWeekly)}
+              </p>
+            </article>
+
+            <article className="strip-col dr" data-testid="dr-card">
+              <p className="strip-label">After: bias-adjusted counterfactual</p>
+              <strong className="strip-policy" data-testid="dr-policy">
+                {buildPolicyPhrase(drResult)}
+              </strong>
+              <p className="strip-metric" data-testid="dr-risk-cost">
+                Incident cost/week: {formatCurrency(score.drRiskCostUsdWeekly)}
+              </p>
+            </article>
+
+            <div className="strip-delta" data-testid="strip-delta">
+              <span>Weekly risk-cost delta</span>
+              <strong>{formatSignedCurrency(score.riskCostImpactUsdWeekly)}</strong>
+            </div>
+          </section>
+
           <p className={`recommendation-line ${score.decisionTone}`} data-testid="recommendation-line">
             {score.recommendationLine}
           </p>
