@@ -1,12 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import {
-  ApiError,
-  Objective,
-  RecommendResponse,
-  SegmentBy,
-  SegmentRecommendation,
-  recommendPolicy
-} from "../api/client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ApiError, Objective, RecommendResponse, SegmentBy, recommendPolicy } from "../api/client";
 import { Controls } from "../components/Controls";
 
 interface UiError {
@@ -16,37 +9,28 @@ interface UiError {
 
 interface MethodRollup {
   successes: number;
-  safeValue: number;
   incidents: number;
   latency: number;
-  avgPolicyLevel: number;
 }
 
 type DecisionTone = "ship" | "pilot" | "hold";
 
-interface DecisionSummary {
-  tone: DecisionTone;
-  status: "SHIP" | "PILOT" | "HOLD";
-  line: string;
-}
-
 interface ImpactScore {
-  decision: DecisionSummary;
-  objectiveLabel: string;
-  objectiveUnit: string;
-  objectiveLiftPer10k: number;
-  objectiveLiftWeekly: number;
-  incidentsAvoidedPer10k: number;
+  decisionTone: DecisionTone;
+  recommendationLine: string;
+  successLiftWeekly: number;
   incidentsAvoidedWeekly: number;
-  latencyDelta: number;
-  noAiCostLine: string;
-  nextActionLine: string;
+  riskCostImpactUsdWeekly: number;
+  latencyDeltaMs: number;
 }
 
-const DEFAULT_MAX_POLICY_LEVEL = 3;
-const WEEKLY_REQUESTS = 5_000_000;
-const WEEKLY_FACTOR = WEEKLY_REQUESTS / 10_000;
-const UI_VERSION = "interactive-v2";
+const DEMO_OBJECTIVE: Objective = "task_success";
+const DEMO_SEGMENT_BY: SegmentBy = "prompt_risk";
+const DEMO_MAX_POLICY_LEVEL = 4;
+
+const DEFAULT_WEEKLY_REQUESTS = 5_000_000;
+const DEFAULT_INCIDENT_COST_USD = 2500;
+const UI_VERSION = "value-v3";
 
 function formatInteger(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -54,157 +38,118 @@ function formatInteger(value: number): string {
   }).format(value);
 }
 
-function signed(value: number, digits = 1): string {
-  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
+function formatSignedInteger(value: number): string {
+  return `${value >= 0 ? "+" : "-"}${formatInteger(Math.abs(value))}`;
 }
 
-function signedInteger(value: number): string {
-  return `${value >= 0 ? "+" : ""}${formatInteger(value)}`;
+function formatSignedCurrency(value: number): string {
+  const abs = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0
+  }).format(Math.abs(value));
+  return `${value >= 0 ? "+" : "-"}${abs}`;
 }
 
 function rollupMethod(response: RecommendResponse): MethodRollup {
   const count = Math.max(response.segments.length, 1);
   const successes = response.segments.reduce((acc, segment) => acc + segment.expected_successes_per_10k, 0) / count;
-  const safeValue = response.segments.reduce((acc, segment) => acc + segment.expected_safe_value_per_10k, 0) / count;
   const incidents = response.segments.reduce((acc, segment) => acc + segment.expected_incidents_per_10k, 0) / count;
   const latency = response.segments.reduce((acc, segment) => acc + segment.expected_latency_ms, 0) / count;
-  const avgPolicyLevel = response.segments.reduce((acc, segment) => acc + segment.recommended_policy_level, 0) / count;
 
   return {
     successes,
-    safeValue,
     incidents,
-    latency,
-    avgPolicyLevel
+    latency
   };
 }
 
-function findRiskLevel(segments: SegmentRecommendation[], risk: "low" | "medium" | "high"): number | null {
-  const target = segments.find((segment) => segment.segment.toLowerCase() === `risk=${risk}`);
-  return target ? target.recommended_policy_level : null;
+function readRiskPolicy(response: RecommendResponse, risk: "low" | "medium" | "high"): number | null {
+  const match = response.segments.find((segment) => segment.segment.toLowerCase() === `risk=${risk}`);
+  return match ? match.recommended_policy_level : null;
 }
 
-function buildPolicyLine(segmentBy: SegmentBy, dr: RecommendResponse): string {
-  if (dr.segments.length === 0) {
-    return "Policy to ship: not available.";
+function buildPolicyPhrase(response: RecommendResponse): string {
+  const low = readRiskPolicy(response, "low");
+  const medium = readRiskPolicy(response, "medium");
+  const high = readRiskPolicy(response, "high");
+
+  if (low !== null && medium !== null && high !== null) {
+    return `L${low} for low-risk, L${medium} for medium-risk, L${high} for high-risk prompts`;
   }
 
-  if (segmentBy === "none") {
-    return `Policy to ship: L${dr.segments[0].recommended_policy_level} for all traffic.`;
-  }
-
-  if (segmentBy === "prompt_risk") {
-    const low = findRiskLevel(dr.segments, "low");
-    const medium = findRiskLevel(dr.segments, "medium");
-    const high = findRiskLevel(dr.segments, "high");
-    if (low !== null && medium !== null && high !== null) {
-      return `Policy to ship: Low-risk L${low}, Medium-risk L${medium}, High-risk L${high}.`;
-    }
-  }
-
-  const top = dr.segments
+  const fallback = response.segments
     .slice(0, 3)
     .map((segment) => `${segment.segment} -> L${segment.recommended_policy_level}`)
     .join(" | ");
 
-  return `Policy to ship: ${top}.`;
+  return fallback || "no policy available";
 }
 
-function chooseDecision(
-  objectiveLiftPer10k: number,
-  incidentsAvoidedPer10k: number,
-  latencyDelta: number,
-  objectiveUnit: string
-): DecisionSummary {
-  const objectiveWeekly = objectiveLiftPer10k * WEEKLY_FACTOR;
-  const incidentWeekly = incidentsAvoidedPer10k * WEEKLY_FACTOR;
+function buildRecommendationLine(params: {
+  dr: RecommendResponse;
+  successLiftWeekly: number;
+  incidentsAvoidedWeekly: number;
+  latencyDeltaMs: number;
+  trafficWeekly: number;
+}): { tone: DecisionTone; text: string } {
+  const { dr, successLiftWeekly, incidentsAvoidedWeekly, latencyDeltaMs, trafficWeekly } = params;
+  const policyPhrase = buildPolicyPhrase(dr);
 
-  if (objectiveLiftPer10k > 0 && incidentsAvoidedPer10k >= 0 && latencyDelta <= 8) {
-    return {
-      tone: "ship",
-      status: "SHIP",
-      line: `Decision: SHIP. Improves ${objectiveUnit} by ${signedInteger(objectiveWeekly)}/week and prevents ${signedInteger(incidentWeekly)} incidents/week vs naive.`
-    };
+  const successMagnitude = formatInteger(Math.abs(successLiftWeekly));
+  const successWord = successLiftWeekly >= 0 ? "more" : "fewer";
+  const incidentMagnitude = formatInteger(Math.abs(incidentsAvoidedWeekly));
+  const incidentWord = incidentsAvoidedWeekly >= 0 ? "fewer" : "more";
+
+  let tone: DecisionTone = "hold";
+  let prefix = "Hold";
+
+  if (incidentsAvoidedWeekly > 0 && successLiftWeekly >= 0) {
+    tone = "ship";
+    prefix = "Ship now";
+  } else if (incidentsAvoidedWeekly > -100 && successLiftWeekly > -1000) {
+    tone = "pilot";
+    prefix = "Pilot first";
   }
 
-  if (objectiveLiftPer10k > 0 && incidentsAvoidedPer10k > -2 && latencyDelta <= 12) {
-    return {
-      tone: "pilot",
-      status: "PILOT",
-      line: `Decision: PILOT. Upside is ${signedInteger(objectiveWeekly)} ${objectiveUnit}/week, but safety/latency needs controlled rollout.`
-    };
-  }
+  const latencyPhrase = latencyDeltaMs <= 0 ? `${Math.abs(latencyDeltaMs).toFixed(1)}ms faster` : `${latencyDeltaMs.toFixed(1)}ms slower`;
 
   return {
-    tone: "hold",
-    status: "HOLD",
-    line: "Decision: HOLD. Under current constraints this is not safer than naive to deploy at full traffic."
+    tone,
+    text:
+      `${prefix}: use ${policyPhrase}; versus naive this projects ${successMagnitude} ${successWord} successful responses/week, ` +
+      `${incidentMagnitude} ${incidentWord} incidents/week, and ${latencyPhrase} latency at ${formatInteger(trafficWeekly)} requests/week.`
   };
-}
-
-function buildNoAiCostLine(objectiveUnit: string, objectiveLiftWeekly: number, incidentsAvoidedWeekly: number): string {
-  const objectiveMagnitude = formatInteger(Math.abs(objectiveLiftWeekly));
-  const incidentsMagnitude = formatInteger(Math.abs(incidentsAvoidedWeekly));
-
-  if (objectiveLiftWeekly > 0 && incidentsAvoidedWeekly > 0) {
-    return `Without AI optimization, keeping naive is projected to lose ${objectiveMagnitude} ${objectiveUnit}/week and add ${incidentsMagnitude} incidents/week.`;
-  }
-
-  if (objectiveLiftWeekly > 0) {
-    return `Without AI optimization, keeping naive is projected to lose ${objectiveMagnitude} ${objectiveUnit}/week.`;
-  }
-
-  if (incidentsAvoidedWeekly > 0) {
-    return `Without AI optimization, keeping naive is projected to add ${incidentsMagnitude} incidents/week.`;
-  }
-
-  return "Current model does not show practical advantage over naive under these constraints; hold until constraints/features change.";
-}
-
-function buildNextActionLine(decision: DecisionSummary): string {
-  if (decision.status === "SHIP") {
-    return "Next action: import bundle into policy service, run 10% canary for 24h, then ramp to 100% if gates hold.";
-  }
-
-  if (decision.status === "PILOT") {
-    return "Next action: run a 10% pilot only; monitor safety and latency gates before any ramp-up.";
-  }
-
-  return "Next action: keep naive policy in production and review feature coverage before re-running.";
 }
 
 function exportPolicyBundle(params: {
   naive: RecommendResponse;
   dr: RecommendResponse;
-  objective: Objective;
-  segmentBy: SegmentBy;
-  maxPolicyLevel: number;
   score: ImpactScore;
-  policyLine: string;
+  weeklyRequests: number;
+  incidentCostUsd: number;
 }): void {
-  const { naive, dr, objective, segmentBy, maxPolicyLevel, score, policyLine } = params;
+  const { naive, dr, score, weeklyRequests, incidentCostUsd } = params;
 
   const bundle = {
     generated_at_utc: new Date().toISOString(),
     artifact_version: dr.artifact_version,
     ui_version: UI_VERSION,
-    decision: {
-      status: score.decision.status,
-      summary: score.decision.line,
-      policy: policyLine
+    scenario: {
+      objective: DEMO_OBJECTIVE,
+      segment_by: DEMO_SEGMENT_BY,
+      max_policy_level: DEMO_MAX_POLICY_LEVEL
     },
-    practical_value: {
-      no_ai_cost: score.noAiCostLine,
-      next_action: score.nextActionLine,
-      objective_delta_weekly: Number(score.objectiveLiftWeekly.toFixed(0)),
-      incidents_avoided_weekly: Number(score.incidentsAvoidedWeekly.toFixed(0)),
-      latency_delta_ms: Number(score.latencyDelta.toFixed(2))
+    assumptions: {
+      weekly_requests: weeklyRequests,
+      incident_cost_usd: incidentCostUsd
     },
-    inputs: {
-      objective,
-      segment_by: segmentBy,
-      max_policy_level: maxPolicyLevel,
-      weekly_request_assumption: WEEKLY_REQUESTS
+    recommendation: score.recommendationLine,
+    impact_vs_naive_weekly: {
+      successful_responses: Math.round(score.successLiftWeekly),
+      incidents_avoided: Math.round(score.incidentsAvoidedWeekly),
+      risk_cost_impact_usd: Math.round(score.riskCostImpactUsdWeekly),
+      latency_delta_ms: Number(score.latencyDeltaMs.toFixed(2))
     },
     recommended_rules: dr.segments.map((segment) => ({
       segment: segment.segment,
@@ -219,7 +164,7 @@ function exportPolicyBundle(params: {
   const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = "edgealign-deployment-bundle.json";
+  link.download = "edge-policy-bundle.json";
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -227,11 +172,10 @@ function exportPolicyBundle(params: {
 }
 
 export function Home(): JSX.Element {
-  const [objective, setObjective] = useState<Objective>("task_success");
-  const [maxPolicyLevel, setMaxPolicyLevel] = useState<number>(DEFAULT_MAX_POLICY_LEVEL);
-  const [segmentBy, setSegmentBy] = useState<SegmentBy>("prompt_risk");
+  const [weeklyRequests, setWeeklyRequests] = useState<number>(DEFAULT_WEEKLY_REQUESTS);
+  const [incidentCostUsd, setIncidentCostUsd] = useState<number>(DEFAULT_INCIDENT_COST_USD);
+
   const [loading, setLoading] = useState(false);
-  const [hasRun, setHasRun] = useState(false);
   const [results, setResults] = useState<{ naive?: RecommendResponse; dr?: RecommendResponse }>({});
   const [error, setError] = useState<UiError | null>(null);
 
@@ -246,21 +190,20 @@ export function Home(): JSX.Element {
     try {
       const [naive, dr] = await Promise.all([
         recommendPolicy({
-          objective,
-          max_policy_level: maxPolicyLevel,
-          segment_by: segmentBy,
+          objective: DEMO_OBJECTIVE,
+          max_policy_level: DEMO_MAX_POLICY_LEVEL,
+          segment_by: DEMO_SEGMENT_BY,
           method: "naive"
         }),
         recommendPolicy({
-          objective,
-          max_policy_level: maxPolicyLevel,
-          segment_by: segmentBy,
+          objective: DEMO_OBJECTIVE,
+          max_policy_level: DEMO_MAX_POLICY_LEVEL,
+          segment_by: DEMO_SEGMENT_BY,
           method: "dr"
         })
       ]);
 
       setResults({ naive, dr });
-      setHasRun(true);
     } catch (err) {
       if (err instanceof ApiError) {
         setError({
@@ -273,7 +216,16 @@ export function Home(): JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, [maxPolicyLevel, objective, segmentBy]);
+  }, []);
+
+  const autoRunRef = useRef(false);
+  useEffect(() => {
+    if (autoRunRef.current) {
+      return;
+    }
+    autoRunRef.current = true;
+    void runAnalysis();
+  }, [runAnalysis]);
 
   const score = useMemo<ImpactScore | null>(() => {
     if (!naiveResult || !drResult) {
@@ -283,46 +235,37 @@ export function Home(): JSX.Element {
     const naive = rollupMethod(naiveResult);
     const dr = rollupMethod(drResult);
 
-    const objectiveLiftPer10k = objective === "task_success" ? dr.successes - naive.successes : dr.safeValue - naive.safeValue;
-    const objectiveLabel = objective === "task_success" ? "Weekly successful responses" : "Weekly safety-adjusted value";
-    const objectiveUnit = objective === "task_success" ? "responses" : "value units";
-    const incidentsAvoidedPer10k = naive.incidents - dr.incidents;
-    const latencyDelta = dr.latency - naive.latency;
+    const weeklyFactor = weeklyRequests / 10_000;
+    const successLiftWeekly = (dr.successes - naive.successes) * weeklyFactor;
+    const incidentsAvoidedWeekly = (naive.incidents - dr.incidents) * weeklyFactor;
+    const latencyDeltaMs = dr.latency - naive.latency;
+    const riskCostImpactUsdWeekly = incidentsAvoidedWeekly * incidentCostUsd;
 
-    const objectiveLiftWeekly = objectiveLiftPer10k * WEEKLY_FACTOR;
-    const incidentsAvoidedWeekly = incidentsAvoidedPer10k * WEEKLY_FACTOR;
-
-    const decision = chooseDecision(objectiveLiftPer10k, incidentsAvoidedPer10k, latencyDelta, objectiveUnit);
+    const recommendation = buildRecommendationLine({
+      dr: drResult,
+      successLiftWeekly,
+      incidentsAvoidedWeekly,
+      latencyDeltaMs,
+      trafficWeekly: weeklyRequests
+    });
 
     return {
-      decision,
-      objectiveLabel,
-      objectiveUnit,
-      objectiveLiftPer10k,
-      objectiveLiftWeekly,
-      incidentsAvoidedPer10k,
+      decisionTone: recommendation.tone,
+      recommendationLine: recommendation.text,
+      successLiftWeekly,
       incidentsAvoidedWeekly,
-      latencyDelta,
-      noAiCostLine: buildNoAiCostLine(objectiveUnit, objectiveLiftWeekly, incidentsAvoidedWeekly),
-      nextActionLine: buildNextActionLine(decision)
+      riskCostImpactUsdWeekly,
+      latencyDeltaMs
     };
-  }, [drResult, naiveResult, objective]);
-
-  const policyLine = useMemo(() => {
-    if (!drResult) {
-      return null;
-    }
-    return buildPolicyLine(segmentBy, drResult);
-  }, [drResult, segmentBy]);
+  }, [naiveResult, drResult, weeklyRequests, incidentCostUsd]);
 
   return (
     <main className="page-shell">
       <header className="panel hero" data-testid="hero">
-        <p className="eyebrow">EdgeAlign-DR</p>
-        <h1>Interactive policy decision simulator</h1>
+        <p className="eyebrow">Edge Policy Optimizer</p>
+        <h1>Bias-adjusted policy recommendation</h1>
         <p className="hero-copy" data-testid="single-story">
-          Change assumptions, click Run, and see the deployment decision, the cost of staying naive, and the exact bundle
-          to apply.
+          This demo automatically corrects bias in historical logs and outputs a deployable guardrail policy that reduces costly incidents while protecting response success.
         </p>
         <p className="version-chip" data-testid="version-chip">
           UI version: {UI_VERSION}
@@ -331,21 +274,18 @@ export function Home(): JSX.Element {
 
       <section className="panel controls-wrap" data-testid="assumptions-panel">
         <Controls
-          objective={objective}
-          maxPolicyLevel={maxPolicyLevel}
-          segmentBy={segmentBy}
-          onObjectiveChange={setObjective}
-          onMaxPolicyLevelChange={setMaxPolicyLevel}
-          onSegmentByChange={setSegmentBy}
+          weeklyRequests={weeklyRequests}
+          incidentCostUsd={incidentCostUsd}
+          onWeeklyRequestsChange={setWeeklyRequests}
+          onIncidentCostChange={setIncidentCostUsd}
           onGenerate={runAnalysis}
           loading={loading}
-          hasResults={hasResults}
         />
       </section>
 
       {loading ? (
         <p className="loading-line" data-testid="loading-line">
-          Running analysis...
+          Running auto-demo...
         </p>
       ) : null}
 
@@ -356,40 +296,26 @@ export function Home(): JSX.Element {
         </p>
       ) : null}
 
-      {hasResults && score && policyLine && naiveResult && drResult ? (
+      {hasResults && score && naiveResult && drResult ? (
         <section className="panel result-panel" data-testid="results-block">
-          <p className={`recommendation-line ${score.decision.tone}`} data-testid="recommendation-line">
-            {score.decision.line}
+          <p className={`recommendation-line ${score.decisionTone}`} data-testid="recommendation-line">
+            {score.recommendationLine}
           </p>
-
-          <p className="result-footnote" data-testid="policy-line">
-            {policyLine}
-          </p>
-
-          <section className="utility-card" data-testid="utility-card">
-            <p className="utility-title">Practical value this week</p>
-            <p className="result-footnote" data-testid="no-ai-line">
-              {score.noAiCostLine}
-            </p>
-            <p className="result-footnote" data-testid="next-action-line">
-              {score.nextActionLine}
-            </p>
-          </section>
 
           <div className="kpi-row">
-            <article className="kpi-card" data-testid="kpi-objective">
-              <p>{score.objectiveLabel}</p>
-              <strong>{signedInteger(score.objectiveLiftWeekly)}</strong>
+            <article className="kpi-card" data-testid="kpi-success">
+              <p>Weekly successful responses vs naive</p>
+              <strong>{formatSignedInteger(score.successLiftWeekly)}</strong>
             </article>
 
-            <article className="kpi-card" data-testid="kpi-incident">
-              <p>Weekly incidents avoided</p>
-              <strong>{signedInteger(score.incidentsAvoidedWeekly)}</strong>
+            <article className="kpi-card" data-testid="kpi-incidents">
+              <p>Weekly incidents avoided vs naive</p>
+              <strong>{formatSignedInteger(score.incidentsAvoidedWeekly)}</strong>
             </article>
 
-            <article className="kpi-card" data-testid="kpi-latency">
-              <p>Latency delta (ms)</p>
-              <strong>{signed(score.latencyDelta, 1)}</strong>
+            <article className="kpi-card" data-testid="kpi-risk-cost">
+              <p>Weekly risk cost impact</p>
+              <strong>{formatSignedCurrency(score.riskCostImpactUsdWeekly)}</strong>
             </article>
           </div>
 
@@ -400,24 +326,18 @@ export function Home(): JSX.Element {
               exportPolicyBundle({
                 naive: naiveResult,
                 dr: drResult,
-                objective,
-                segmentBy,
-                maxPolicyLevel,
                 score,
-                policyLine
+                weeklyRequests,
+                incidentCostUsd
               })
             }
             data-testid="apply-policy"
             disabled={!naiveResult || !drResult}
           >
-            Apply policy (download deployment bundle)
+            Apply policy (export JSON)
           </button>
         </section>
-      ) : (
-        <section className="panel empty-state" data-testid="empty-state">
-          <p>{hasRun ? "No recommendation available." : "Set assumptions and click Run to generate a decision."}</p>
-        </section>
-      )}
+      ) : null}
     </main>
   );
 }
