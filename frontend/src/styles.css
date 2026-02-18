@@ -161,6 +161,23 @@ h1 {
   line-height: 1.42;
   font-weight: 700;
   color: #0b4f60;
+  border-left: 4px solid #7a8b98;
+  padding-left: 10px;
+}
+
+.recommendation-line.ship {
+  border-left-color: #0f766e;
+  color: #0d5a54;
+}
+
+.recommendation-line.pilot {
+  border-left-color: #9a6700;
+  color: #7c5d00;
+}
+
+.recommendation-line.hold {
+  border-left-color: #b42318;
+  color: #8f1d14;
 }
 
 .kpi-row {

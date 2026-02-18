@@ -22,25 +22,42 @@ interface MethodRollup {
   avgPolicyLevel: number;
 }
 
+type DecisionTone = "ship" | "pilot" | "hold";
+
+interface DecisionSummary {
+  tone: DecisionTone;
+  status: "SHIP" | "PILOT" | "HOLD";
+  line: string;
+}
+
+interface ImpactScore {
+  decision: DecisionSummary;
+  objectiveLabel: string;
+  objectiveUnit: string;
+  objectiveLiftPer10k: number;
+  objectiveLiftWeekly: number;
+  incidentsAvoidedPer10k: number;
+  incidentsAvoidedWeekly: number;
+  latencyDelta: number;
+  whyLine: string;
+}
+
 const DEFAULT_MAX_POLICY_LEVEL = 3;
+const WEEKLY_REQUESTS = 5_000_000;
+const WEEKLY_FACTOR = WEEKLY_REQUESTS / 10_000;
 
-function exportPolicy(response: RecommendResponse | null): void {
-  if (!response) {
-    return;
-  }
-
-  const blob = new Blob([JSON.stringify(response, null, 2)], { type: "application/json" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = "edgealign-policy.json";
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(link.href);
+function formatInteger(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0
+  }).format(value);
 }
 
 function signed(value: number, digits = 1): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
+}
+
+function signedInteger(value: number): string {
+  return `${value >= 0 ? "+" : ""}${formatInteger(value)}`;
 }
 
 function rollupMethod(response: RecommendResponse): MethodRollup {
@@ -67,11 +84,11 @@ function findRiskLevel(segments: SegmentRecommendation[], risk: "low" | "medium"
 
 function buildPolicyLine(segmentBy: SegmentBy, dr: RecommendResponse): string {
   if (dr.segments.length === 0) {
-    return "No policy recommendation could be generated.";
+    return "Policy to ship: not available.";
   }
 
   if (segmentBy === "none") {
-    return `Recommendation: run guardrail level L${dr.segments[0].recommended_policy_level} for all traffic.`;
+    return `Policy to ship: L${dr.segments[0].recommended_policy_level} for all traffic.`;
   }
 
   if (segmentBy === "prompt_risk") {
@@ -79,27 +96,110 @@ function buildPolicyLine(segmentBy: SegmentBy, dr: RecommendResponse): string {
     const medium = findRiskLevel(dr.segments, "medium");
     const high = findRiskLevel(dr.segments, "high");
     if (low !== null && medium !== null && high !== null) {
-      return `Recommendation: Low-risk L${low}, Medium-risk L${medium}, High-risk L${high}.`;
+      return `Policy to ship: Low-risk L${low}, Medium-risk L${medium}, High-risk L${high}.`;
     }
   }
 
   const top = dr.segments
     .slice(0, 3)
-    .map((segment) => `${segment.segment}: L${segment.recommended_policy_level}`)
+    .map((segment) => `${segment.segment} -> L${segment.recommended_policy_level}`)
     .join(" | ");
-  return `Recommendation: ${top}.`;
+
+  return `Policy to ship: ${top}.`;
 }
 
-function buildWhyLine(
-  objective: Objective,
-  naive: MethodRollup,
-  dr: MethodRollup,
-  objectiveLift: number,
-  incidentsAvoided: number,
-  latencyDelta: number
-): string {
-  const objectiveName = objective === "task_success" ? "successful responses" : "safety-adjusted value";
-  return `Bias-adjusted policy beats naive: average level ${naive.avgPolicyLevel.toFixed(2)} -> ${dr.avgPolicyLevel.toFixed(2)}, ${objectiveName} ${signed(objectiveLift, 1)} per 10k, incidents ${signed(incidentsAvoided, 1)}, latency ${signed(latencyDelta, 1)} ms.`;
+function chooseDecision(
+  objectiveLiftPer10k: number,
+  incidentsAvoidedPer10k: number,
+  latencyDelta: number,
+  objectiveUnit: string
+): DecisionSummary {
+  const objectiveWeekly = objectiveLiftPer10k * WEEKLY_FACTOR;
+  const incidentWeekly = incidentsAvoidedPer10k * WEEKLY_FACTOR;
+
+  if (objectiveLiftPer10k > 0 && incidentsAvoidedPer10k >= 0 && latencyDelta <= 8) {
+    return {
+      tone: "ship",
+      status: "SHIP",
+      line: `Decision: SHIP. Improves ${objectiveUnit} by ${signedInteger(objectiveWeekly)}/week and prevents ${signedInteger(incidentWeekly)} incidents/week vs naive.`
+    };
+  }
+
+  if (objectiveLiftPer10k > 0 && incidentsAvoidedPer10k > -2 && latencyDelta <= 12) {
+    return {
+      tone: "pilot",
+      status: "PILOT",
+      line: `Decision: PILOT. Upside is ${signedInteger(objectiveWeekly)} ${objectiveUnit}/week, but safety/latency needs controlled rollout.`
+    };
+  }
+
+  return {
+    tone: "hold",
+    status: "HOLD",
+    line: `Decision: HOLD. Under current constraints this is not safer than naive to deploy at full traffic.`
+  };
+}
+
+function exportPolicyBundle(params: {
+  naive: RecommendResponse;
+  dr: RecommendResponse;
+  objective: Objective;
+  segmentBy: SegmentBy;
+  maxPolicyLevel: number;
+  score: ImpactScore;
+  policyLine: string;
+}): void {
+  const { naive, dr, objective, segmentBy, maxPolicyLevel, score, policyLine } = params;
+
+  const bundle = {
+    generated_at_utc: new Date().toISOString(),
+    artifact_version: dr.artifact_version,
+    decision: {
+      status: score.decision.status,
+      summary: score.decision.line,
+      policy: policyLine
+    },
+    inputs: {
+      objective,
+      segment_by: segmentBy,
+      max_policy_level: maxPolicyLevel,
+      weekly_request_assumption: WEEKLY_REQUESTS
+    },
+    recommended_rules: dr.segments.map((segment) => ({
+      segment: segment.segment,
+      policy_level: segment.recommended_policy_level
+    })),
+    naive_reference_rules: naive.segments.map((segment) => ({
+      segment: segment.segment,
+      policy_level: segment.recommended_policy_level
+    })),
+    expected_impact_vs_naive: {
+      objective_delta_per_10k: Number(score.objectiveLiftPer10k.toFixed(2)),
+      objective_delta_weekly: Number(score.objectiveLiftWeekly.toFixed(0)),
+      incidents_avoided_per_10k: Number(score.incidentsAvoidedPer10k.toFixed(2)),
+      incidents_avoided_weekly: Number(score.incidentsAvoidedWeekly.toFixed(0)),
+      latency_delta_ms: Number(score.latencyDelta.toFixed(2))
+    },
+    rollout_gates: [
+      "Keep rollout if objective delta vs naive remains >= 0 over trailing 24h.",
+      "Keep rollout only if incidents avoided vs naive remains >= 0 over trailing 24h.",
+      "Keep rollout only if latency delta vs naive remains <= 12 ms."
+    ],
+    rollback_triggers: [
+      "Rollback if incidents avoided vs naive is negative for 2 consecutive windows.",
+      "Rollback if latency delta exceeds 15 ms for 2 consecutive windows.",
+      "Rollback if primary objective delta vs naive is negative for 2 consecutive windows."
+    ]
+  };
+
+  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "edgealign-deployment-bundle.json";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(link.href);
 }
 
 export function Home(): JSX.Element {
@@ -114,7 +214,8 @@ export function Home(): JSX.Element {
   const autoRunRef = useRef(false);
 
   const hasResults = Boolean(results.naive && results.dr);
-  const appliedPolicy = results.dr ?? null;
+  const naiveResult = results.naive;
+  const drResult = results.dr;
 
   const runAnalysis = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -160,7 +261,7 @@ export function Home(): JSX.Element {
     void runAnalysis();
   }, [runAnalysis]);
 
-  const score = useMemo(() => {
+  const score = useMemo<ImpactScore | null>(() => {
     if (!results.naive || !results.dr) {
       return null;
     }
@@ -168,21 +269,31 @@ export function Home(): JSX.Element {
     const naive = rollupMethod(results.naive);
     const dr = rollupMethod(results.dr);
 
-    const objectiveLift = objective === "task_success" ? dr.successes - naive.successes : dr.safeValue - naive.safeValue;
-    const objectiveLabel = objective === "task_success" ? "Successful responses" : "Safety-adjusted value";
-    const incidentsAvoided = naive.incidents - dr.incidents;
+    const objectiveLiftPer10k = objective === "task_success" ? dr.successes - naive.successes : dr.safeValue - naive.safeValue;
+    const objectiveLabel = objective === "task_success" ? "Weekly successful responses" : "Weekly safety-adjusted value";
+    const objectiveUnit = objective === "task_success" ? "responses" : "value units";
+    const incidentsAvoidedPer10k = naive.incidents - dr.incidents;
     const latencyDelta = dr.latency - naive.latency;
 
+    const objectiveLiftWeekly = objectiveLiftPer10k * WEEKLY_FACTOR;
+    const incidentsAvoidedWeekly = incidentsAvoidedPer10k * WEEKLY_FACTOR;
+
+    const decision = chooseDecision(objectiveLiftPer10k, incidentsAvoidedPer10k, latencyDelta, objectiveUnit);
+
     return {
-      objectiveLift,
+      decision,
       objectiveLabel,
-      incidentsAvoided,
+      objectiveUnit,
+      objectiveLiftPer10k,
+      objectiveLiftWeekly,
+      incidentsAvoidedPer10k,
+      incidentsAvoidedWeekly,
       latencyDelta,
-      whyLine: buildWhyLine(objective, naive, dr, objectiveLift, incidentsAvoided, latencyDelta)
+      whyLine: `Export includes deployment-ready rules plus rollout gates and rollback triggers.`
     };
   }, [objective, results.dr, results.naive]);
 
-  const recommendationLine = useMemo(() => {
+  const policyLine = useMemo(() => {
     if (!results.dr) {
       return null;
     }
@@ -222,7 +333,7 @@ export function Home(): JSX.Element {
 
       {!loading && autoLoaded ? (
         <p className="loading-line done" data-testid="loaded-line">
-          Auto-demo complete. Adjust assumptions and run again if needed.
+          Auto-demo complete. Decision and deployment bundle are ready.
         </p>
       ) : null}
 
@@ -233,25 +344,29 @@ export function Home(): JSX.Element {
         </p>
       ) : null}
 
-      {hasResults && score && recommendationLine ? (
+      {hasResults && score && policyLine && naiveResult && drResult ? (
         <section className="panel result-panel" data-testid="results-block">
-          <p className="recommendation-line" data-testid="recommendation-line">
-            {recommendationLine}
+          <p className={`recommendation-line ${score.decision.tone}`} data-testid="recommendation-line">
+            {score.decision.line}
+          </p>
+
+          <p className="result-footnote" data-testid="policy-line">
+            {policyLine}
           </p>
 
           <div className="kpi-row">
             <article className="kpi-card" data-testid="kpi-objective">
-              <p>{score.objectiveLabel} gain (per 10k)</p>
-              <strong>{signed(score.objectiveLift, 1)}</strong>
+              <p>{score.objectiveLabel}</p>
+              <strong>{signedInteger(score.objectiveLiftWeekly)}</strong>
             </article>
 
             <article className="kpi-card" data-testid="kpi-incident">
-              <p>Safety incidents avoided (per 10k)</p>
-              <strong>{signed(score.incidentsAvoided, 1)}</strong>
+              <p>Weekly incidents avoided</p>
+              <strong>{signedInteger(score.incidentsAvoidedWeekly)}</strong>
             </article>
 
             <article className="kpi-card" data-testid="kpi-latency">
-              <p>Latency change (ms)</p>
+              <p>Latency delta (ms)</p>
               <strong>{signed(score.latencyDelta, 1)}</strong>
             </article>
           </div>
@@ -263,11 +378,21 @@ export function Home(): JSX.Element {
           <button
             type="button"
             className="button-primary"
-            onClick={() => exportPolicy(appliedPolicy)}
+            onClick={() =>
+              exportPolicyBundle({
+                naive: naiveResult,
+                dr: drResult,
+                objective,
+                segmentBy,
+                maxPolicyLevel,
+                score,
+                policyLine
+              })
+            }
             data-testid="apply-policy"
-            disabled={!appliedPolicy}
+            disabled={!naiveResult || !drResult}
           >
-            Apply policy (export JSON)
+            Apply policy (download deployment bundle)
           </button>
         </section>
       ) : (

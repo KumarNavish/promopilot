@@ -8,7 +8,8 @@ test("auto-demo runs on load and shows minimal actionable output", async ({ page
 
   await expect(page.getByTestId("results-block")).toBeVisible();
   await expect(page.getByTestId("recommendation-line")).toBeVisible();
-  await expect(page.getByTestId("recommendation-line")).toContainText("Recommendation:");
+  await expect(page.getByTestId("recommendation-line")).toContainText("Decision:");
+  await expect(page.getByTestId("policy-line")).toContainText("Policy to ship:");
   await expect(page.getByTestId("kpi-objective")).toBeVisible();
   await expect(page.getByTestId("kpi-incident")).toBeVisible();
   await expect(page.getByTestId("kpi-latency")).toBeVisible();
