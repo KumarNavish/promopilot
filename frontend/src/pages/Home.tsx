@@ -51,9 +51,6 @@ interface HorizonConfig {
 
 interface ImpactScore {
   recommendationLine: string;
-  usefulnessLine: string;
-  operationsLine: string;
-  policyDiffLine: string;
   successLift: number;
   incidentsAvoided: number;
   riskCostImpactUsd: number;
@@ -193,19 +190,6 @@ function buildPolicyPhrase(policy: PolicyMap): string {
     .join(", ");
 }
 
-function buildPolicyDiffLine(naivePolicy: PolicyMap, aiPolicy: PolicyMap): string {
-  const changed = Object.keys(aiPolicy)
-    .sort()
-    .filter((segment) => aiPolicy[segment] !== naivePolicy[segment])
-    .map((segment) => `${cleanSegment(segment)} L${naivePolicy[segment]} -> L${aiPolicy[segment]}`);
-
-  if (changed.length === 0) {
-    return "Policy changes vs naive: none; gains come from better counterfactual ranking.";
-  }
-
-  return `Policy changes vs naive: ${changed.join(" | ")}.`;
-}
-
 function buildQueueTimeline(params: {
   naiveWeeklyIncidents: number;
   aiWeeklyIncidents: number;
@@ -318,8 +302,6 @@ function exportPolicyBundle(params: {
       incident_cost_usd: incidentCostUsd
     },
     recommendation: score.recommendationLine,
-    operational_usefulness: score.usefulnessLine,
-    operational_oncall: score.operationsLine,
     impact_vs_naive: {
       successful_outcomes: Math.round(score.successLift),
       incidents_avoided: Math.round(score.incidentsAvoided),
@@ -435,17 +417,11 @@ export function Home(): JSX.Element {
       incidentsAvoided >= 0
         ? `${formatInteger(incidentsAvoided)} fewer incidents`
         : `${formatInteger(Math.abs(incidentsAvoided))} additional incidents`;
-    const traceableMathLine = "Traceable math: incidents = incidents_per_10k x traffic/10k x horizon; risk cost = incidents x incident cost.";
 
     return {
       recommendationLine: `Ship now: ${policyPhrase}. In ${horizonConfig.label}, this bias-adjusted policy projects ${formatSignedInteger(
         successLift
       )} successful outcomes with ${incidentPhrase} vs naive targeting.`,
-      usefulnessLine: `Practical impact: ${formatSignedInteger(incidentsAvoided)} incidents and ${formatSignedCurrency(
-        riskCostImpactUsd
-      )} risk-cost impact vs naive.`,
-      operationsLine: traceableMathLine,
-      policyDiffLine: buildPolicyDiffLine(naivePolicy, aiPolicy),
       successLift,
       incidentsAvoided,
       riskCostImpactUsd,
@@ -512,26 +488,16 @@ export function Home(): JSX.Element {
   const animatedNaiveQueue = useAnimatedNumber(currentNaiveQueue ?? 0, `${animationKey}|minute-${timelineMinute}|naive`, 230);
   const animatedAiQueue = useAnimatedNumber(currentAiQueue ?? 0, `${animationKey}|minute-${timelineMinute}|ai`, 230);
   const timelineMaxQueue = Math.max(...(queueTimeline?.naiveQueue ?? [1]), ...(queueTimeline?.aiQueue ?? [1]), 1);
-  const timelineSummary =
-    currentNaiveQueue >= currentAiQueue
-      ? `Minute ${timelineMinute}: bias-adjusted queue is ${formatInteger(currentNaiveQueue - currentAiQueue)} incidents lower.`
-      : `Minute ${timelineMinute}: queue pressure is ${formatInteger(currentAiQueue - currentNaiveQueue)} incidents higher; investigate operating mode.`;
-  const timelineVerdict = queueTimeline
-    ? queueTimeline.naiveBreachMinute !== null && queueTimeline.aiBreachMinute === null
-      ? `Incident-room verdict: naive breaches SLO at minute ${queueTimeline.naiveBreachMinute}; bias-adjusted stays below threshold ${queueTimeline.sloThreshold}.`
-      : queueTimeline.naiveBreachMinute !== null && queueTimeline.aiBreachMinute !== null
-        ? (() => {
-            const breachDelta = queueTimeline.aiBreachMinute - queueTimeline.naiveBreachMinute;
-            if (breachDelta > 0) {
-              return `Incident-room verdict: both breach, but bias-adjusted delays breach by ${formatInteger(breachDelta)} minutes.`;
-            }
-            if (breachDelta < 0) {
-              return `Incident-room verdict: both breach, and bias-adjusted breaches ${formatInteger(Math.abs(breachDelta))} minutes earlier; choose reliability mode.`;
-            }
-            return "Incident-room verdict: both breach at the same minute; gains come from lower sustained queue afterward.";
-          })()
-        : `Incident-room verdict: both stay under SLO threshold ${queueTimeline.sloThreshold}, with lower queue pressure on bias-adjusted policy.`
+  const breachBadge = queueTimeline
+    ? queueTimeline.naiveBreachMinute === null && queueTimeline.aiBreachMinute === null
+      ? `SLO safe (<= ${queueTimeline.sloThreshold})`
+      : queueTimeline.naiveBreachMinute !== null && queueTimeline.aiBreachMinute === null
+        ? `Naive breaches @ m${queueTimeline.naiveBreachMinute}`
+        : queueTimeline.naiveBreachMinute !== null && queueTimeline.aiBreachMinute !== null
+          ? `Breach delta: ${formatSignedInteger(queueTimeline.aiBreachMinute - queueTimeline.naiveBreachMinute)} min`
+          : `AI breaches @ m${queueTimeline.aiBreachMinute}`
     : "";
+  const queueDelta = formatSignedInteger(currentNaiveQueue - currentAiQueue);
 
   const weeklyRequestsMillions = weeklyRequests / 1_000_000;
 
@@ -541,13 +507,13 @@ export function Home(): JSX.Element {
         <p className="eyebrow">Counterfactual policy runner</p>
         <h1>One-click AI policy optimizer</h1>
         <p className="hero-copy" data-testid="single-story">
-          This demo auto-runs on load, corrects biased logs, and shows the exact policy that moves both reliability and business value.
+          Auto-runs on load and outputs the policy to ship.
         </p>
       </header>
 
       <section className="controls" data-testid="controls">
         <div className="field">
-          <p className="field-label">Operating mode</p>
+          <p className="field-label">Mode</p>
           <div className="mode-toggle" role="tablist" aria-label="Operating mode">
             {(["reliability", "throughput"] as OperatingMode[]).map((option) => (
               <button
@@ -564,7 +530,7 @@ export function Home(): JSX.Element {
         </div>
 
         <div className="field">
-          <p className="field-label">Time horizon</p>
+          <p className="field-label">Horizon</p>
           <div className="mode-toggle" role="tablist" aria-label="Time horizon">
             {(["week", "quarter", "year"] as Horizon[]).map((option) => (
               <button
@@ -582,7 +548,7 @@ export function Home(): JSX.Element {
 
         <div className="field">
           <label className="field-label" htmlFor="weekly-requests">
-            Weekly traffic: {weeklyRequestsMillions.toFixed(1)}M requests
+            Traffic: {weeklyRequestsMillions.toFixed(1)}M/wk
           </label>
           <input
             id="weekly-requests"
@@ -598,7 +564,7 @@ export function Home(): JSX.Element {
 
         <div className="field span-two">
           <label className="field-label" htmlFor="incident-cost">
-            Incident cost: ${formatInteger(incidentCostUsd)} each
+            Incident cost: ${formatInteger(incidentCostUsd)}
           </label>
           <input
             id="incident-cost"
@@ -631,23 +597,12 @@ export function Home(): JSX.Element {
           <p className="recommendation-line" data-testid="recommendation-line">
             {score.recommendationLine}
           </p>
-          <p className="usefulness-line" data-testid="usefulness-line">
-            {score.usefulnessLine}
-          </p>
-          <p className="operations-line" data-testid="operations-line">
-            {score.operationsLine}
-          </p>
-          <p className="policy-diff-line" data-testid="policy-diff-line">
-            {score.policyDiffLine}
-          </p>
 
           <section className="impact-strip" data-testid="impact-strip">
             <div className="impact-strip-header">
               <div className="timeline-title">
-                <p>Minute-by-minute queue stabilization</p>
-                <p className="timeline-summary" data-testid="timeline-minute">
-                  {timelineSummary}
-                </p>
+                <p>12-min queue simulation</p>
+                <p className="timeline-summary" data-testid="timeline-minute">{`m${timelineMinute} | delta ${queueDelta}`}</p>
               </div>
               <div className="timeline-actions">
                 <button
@@ -675,7 +630,7 @@ export function Home(): JSX.Element {
             </div>
             <div className="timeline-controls">
               <label className="field-label" htmlFor="timeline-capacity">
-                Incident desk capacity: x{capacityMultiplier.toFixed(2)} of current load
+                Capacity x{capacityMultiplier.toFixed(2)}
               </label>
               <input
                 id="timeline-capacity"
@@ -729,12 +684,12 @@ export function Home(): JSX.Element {
               </article>
             </div>
 
-            <p className="timeline-footnote">Bars are unresolved incidents waiting in queue each minute.</p>
-            <p className="timeline-math" data-testid="timeline-math">
-              queue[t+1] = max(0, queue[t] + arrivals - capacity) where arrivals/min are {queueTimeline?.naiveArrivalPerMin.toFixed(2)} (naive)
-              and {queueTimeline?.aiArrivalPerMin.toFixed(2)} (bias-adjusted), capacity/min is {queueTimeline?.capacityPerMin.toFixed(2)}, and
-              initial backlog is {formatInteger(queueTimeline?.initialBacklog ?? 0)}.
-            </p>
+            <div className="timeline-chips" data-testid="timeline-math">
+              <span>{`naive in ${queueTimeline?.naiveArrivalPerMin.toFixed(2)}/m`}</span>
+              <span>{`ai in ${queueTimeline?.aiArrivalPerMin.toFixed(2)}/m`}</span>
+              <span>{`cap ${queueTimeline?.capacityPerMin.toFixed(2)}/m`}</span>
+              <span>{`SLO ${breachBadge}`}</span>
+            </div>
             <input
               type="range"
               min={0}
@@ -747,9 +702,6 @@ export function Home(): JSX.Element {
               }}
               data-testid="timeline-scrubber"
             />
-            <p className="timeline-verdict" data-testid="timeline-verdict">
-              {timelineVerdict}
-            </p>
           </section>
 
           <div className="kpi-row">

@@ -167,38 +167,6 @@ input[type="range"] {
   font-weight: 700;
 }
 
-.usefulness-line {
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: #f7fffb;
-  border: 1px solid #b6efe0;
-  color: #065f46;
-  font-weight: 700;
-}
-
-.operations-line {
-  margin: 0;
-  padding: 9px 12px;
-  border-radius: 10px;
-  border: 1px solid #dbeafe;
-  background: #f8fbff;
-  color: #1e3a5f;
-  font-size: 0.86rem;
-  font-weight: 700;
-}
-
-.policy-diff-line {
-  margin: 0;
-  padding: 9px 10px;
-  border-radius: 9px;
-  border: 1px solid #dbeafe;
-  background: #f8fbff;
-  color: #1e3a5f;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
 .impact-strip {
   border: 1px solid #d4e8f8;
   border-radius: 12px;
@@ -242,6 +210,22 @@ input[type="range"] {
 .timeline-controls {
   display: grid;
   gap: 6px;
+}
+
+.timeline-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.timeline-chips span {
+  border: 1px solid #dbeafe;
+  background: #f8fbff;
+  color: #1e3a5f;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 
 .replay-button {
@@ -320,35 +304,6 @@ input[type="range"] {
 
 .timeline-bar.active {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.24);
-}
-
-.timeline-footnote {
-  margin: 0;
-  color: #475569;
-  font-size: 0.76rem;
-  font-weight: 600;
-}
-
-.timeline-math {
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: 9px;
-  border: 1px solid #dbeafe;
-  background: #f8fbff;
-  color: #1e3a5f;
-  font-size: 0.77rem;
-  font-weight: 600;
-}
-
-.timeline-verdict {
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: 9px;
-  border: 1px solid #bfdbfe;
-  background: #eff6ff;
-  color: #1e3a5f;
-  font-size: 0.8rem;
-  font-weight: 700;
 }
 
 .kpi-row {
