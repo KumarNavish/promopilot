@@ -99,6 +99,14 @@ function formatInteger(value: number): string {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
 }
 
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0
+  }).format(value);
+}
+
 function computeSegmentShifts(naive: RecommendResponse, dr: RecommendResponse): SegmentShift[] {
   const naiveMap = new Map(naive.segments.map((segment) => [segment.segment, segment]));
   const shifts = dr.segments
@@ -132,6 +140,7 @@ export function Home(): JSX.Element {
   const [results, setResults] = useState<Partial<Record<Method, RecommendResponse>>>({});
   const [error, setError] = useState<UiError | null>(null);
   const [hasAutoRun, setHasAutoRun] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   const hasResults = Boolean(results.naive || results.dr);
   const activeResponse = results[activeMethod] ?? results.dr ?? results.naive ?? null;
@@ -177,6 +186,23 @@ export function Home(): JSX.Element {
       annualNetValueDelta: scorecard.netValueDelta * multiplier * 12
     };
   }, [scorecard]);
+
+  const rolloutStats = useMemo(() => {
+    if (segmentShifts.length === 0) {
+      return null;
+    }
+
+    const changedSegments = segmentShifts.filter((shift) => shift.discountDelta !== 0).length;
+    const discountDownSegments = segmentShifts.filter((shift) => shift.discountDelta < 0).length;
+    const discountUpSegments = segmentShifts.filter((shift) => shift.discountDelta > 0).length;
+
+    return {
+      totalSegments: segmentShifts.length,
+      changedSegments,
+      discountDownSegments,
+      discountUpSegments
+    };
+  }, [segmentShifts]);
 
   const wowHeadline = useMemo(() => {
     if (!scorecard) {
@@ -299,6 +325,13 @@ export function Home(): JSX.Element {
                 This replaces naive conversion-led discounting with a policy that corrects targeting bias before allocating
                 promo spend.
               </p>
+              {rolloutStats ? (
+                <p className="recommendation-copy">
+                  Policy changes in <strong>{rolloutStats.changedSegments}</strong> of{" "}
+                  <strong>{rolloutStats.totalSegments}</strong> segments: {rolloutStats.discountDownSegments} discount cuts,{" "}
+                  {rolloutStats.discountUpSegments} increases.
+                </p>
+              ) : null}
               <div className="recommendation-metrics">
                 <article>
                   <p>Monthly bookings impact (at 1M users)</p>
@@ -306,56 +339,15 @@ export function Home(): JSX.Element {
                 </article>
                 <article>
                   <p>Monthly net value impact (at 1M users)</p>
-                  <strong>{signed(scaledImpact.monthlyNetValueDelta, 0)}</strong>
+                  <strong>{formatCurrency(scaledImpact.monthlyNetValueDelta)}</strong>
                 </article>
                 <article>
                   <p>Annual net value impact (at 1M users/month)</p>
-                  <strong>{signed(scaledImpact.annualNetValueDelta, 0)}</strong>
+                  <strong>{formatCurrency(scaledImpact.annualNetValueDelta)}</strong>
                 </article>
                 <article>
                   <p>Average discount shift (DR - Naive)</p>
                   <strong>{signed(scorecard.discountDelta)} pp</strong>
-                </article>
-              </div>
-            </section>
-          ) : null}
-
-          {scorecard ? (
-            <section className="panel wow-panel" data-testid="wow-panel">
-              <p className="eyebrow">Decision Signal</p>
-              <h2>{wowHeadline}</h2>
-              <p className="wow-subtitle">
-                Compare methods on the same segment setup and max discount. Metrics shown are mean expected impact per
-                segment cohort of 10k users.
-              </p>
-              <div className="wow-metrics">
-                <article>
-                  <p className="metric-label">Bookings delta (DR - Naive)</p>
-                  <p className="metric-value">{signed(scorecard.bookingsDelta)}</p>
-                </article>
-                <article>
-                  <p className="metric-label">Net value delta (DR - Naive)</p>
-                  <p className="metric-value">{signed(scorecard.netValueDelta, 0)}</p>
-                </article>
-                <article>
-                  <p className="metric-label">Avg discount delta (DR - Naive)</p>
-                  <p className="metric-value">{signed(scorecard.discountDelta)}</p>
-                </article>
-              </div>
-              <div className="method-summary-grid">
-                <article>
-                  <p className="narrative-title">Naive observed</p>
-                  <p>
-                    Bookings {formatInteger(scorecard.naive.bookings)} | Net value {formatInteger(scorecard.naive.netValue)} |
-                    Avg discount {scorecard.naive.avgDiscount.toFixed(1)}%
-                  </p>
-                </article>
-                <article>
-                  <p className="narrative-title">Bias-adjusted</p>
-                  <p>
-                    Bookings {formatInteger(scorecard.dr.bookings)} | Net value {formatInteger(scorecard.dr.netValue)} | Avg
-                    discount {scorecard.dr.avgDiscount.toFixed(1)}%
-                  </p>
                 </article>
               </div>
             </section>
@@ -396,29 +388,15 @@ export function Home(): JSX.Element {
             </section>
           ) : null}
 
-          {comparisonText ? <p className="comparison-banner">{comparisonText}</p> : null}
-
-          <div className="cards-grid">
-            {results.naive ? (
-              <PolicyCard
-                method="naive"
-                response={results.naive}
-                objective={objective}
-                highlighted={activeMethod === "naive"}
-              />
-            ) : null}
-            {results.dr ? (
-              <PolicyCard
-                method="dr"
-                response={results.dr}
-                objective={objective}
-                highlighted={activeMethod === "dr"}
-              />
-            ) : null}
-          </div>
-
           <div className="row-actions">
-            <TogglePill value={activeMethod} onChange={setActiveMethod} />
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={() => setShowDiagnostics((current) => !current)}
+              data-testid="toggle-diagnostics"
+            >
+              {showDiagnostics ? "Hide diagnostics" : "Show model diagnostics"}
+            </button>
             <button
               type="button"
               className="button-secondary"
@@ -430,9 +408,75 @@ export function Home(): JSX.Element {
             </button>
           </div>
 
-          {scorecard ? <BeforeAfterStrip objective={objective} naive={scorecard.naive} dr={scorecard.dr} /> : null}
+          {showDiagnostics && scorecard ? (
+            <section className="panel wow-panel" data-testid="wow-panel">
+              <p className="eyebrow">Diagnostics</p>
+              <h2>{wowHeadline}</h2>
+              <p className="wow-subtitle">
+                Compare methods on the same segment setup and max discount. Metrics shown are mean expected impact per
+                segment cohort of 10k users.
+              </p>
+              <div className="wow-metrics">
+                <article>
+                  <p className="metric-label">Bookings delta (DR - Naive)</p>
+                  <p className="metric-value">{signed(scorecard.bookingsDelta)}</p>
+                </article>
+                <article>
+                  <p className="metric-label">Net value delta (DR - Naive)</p>
+                  <p className="metric-value">{signed(scorecard.netValueDelta, 0)}</p>
+                </article>
+                <article>
+                  <p className="metric-label">Avg discount delta (DR - Naive)</p>
+                  <p className="metric-value">{signed(scorecard.discountDelta)}</p>
+                </article>
+              </div>
+              <div className="method-summary-grid">
+                <article>
+                  <p className="narrative-title">Naive observed</p>
+                  <p>
+                    Bookings {formatInteger(scorecard.naive.bookings)} | Net value {formatInteger(scorecard.naive.netValue)} |
+                    Avg discount {scorecard.naive.avgDiscount.toFixed(1)}%
+                  </p>
+                </article>
+                <article>
+                  <p className="narrative-title">Bias-adjusted</p>
+                  <p>
+                    Bookings {formatInteger(scorecard.dr.bookings)} | Net value {formatInteger(scorecard.dr.netValue)} | Avg
+                    discount {scorecard.dr.avgDiscount.toFixed(1)}%
+                  </p>
+                </article>
+              </div>
+            </section>
+          ) : null}
 
-          {activeResponse ? (
+          {showDiagnostics && comparisonText ? <p className="comparison-banner">{comparisonText}</p> : null}
+
+          {showDiagnostics ? (
+            <div className="cards-grid">
+              {results.naive ? (
+                <PolicyCard
+                  method="naive"
+                  response={results.naive}
+                  objective={objective}
+                  highlighted={activeMethod === "naive"}
+                />
+              ) : null}
+              {results.dr ? (
+                <PolicyCard
+                  method="dr"
+                  response={results.dr}
+                  objective={objective}
+                  highlighted={activeMethod === "dr"}
+                />
+              ) : null}
+            </div>
+          ) : null}
+
+          {showDiagnostics ? <TogglePill value={activeMethod} onChange={setActiveMethod} /> : null}
+
+          {showDiagnostics && scorecard ? <BeforeAfterStrip objective={objective} naive={scorecard.naive} dr={scorecard.dr} /> : null}
+
+          {showDiagnostics && activeResponse ? (
             <DoseResponseChart objective={objective} doseResponse={activeResponse.dose_response} />
           ) : null}
         </section>
