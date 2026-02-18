@@ -12,6 +12,14 @@ interface ControlsProps {
   hasResults: boolean;
 }
 
+const POLICY_HINTS: Record<number, string> = {
+  0: "Very light guardrails, fastest responses.",
+  1: "Light guardrails with small safety checks.",
+  2: "Balanced guardrails for most launches.",
+  3: "Strict guardrails for higher-risk traffic.",
+  4: "Maximum strictness, strongest blocking."
+};
+
 export function Controls({
   objective,
   maxPolicyLevel,
@@ -27,33 +35,33 @@ export function Controls({
     <section className="controls-panel" aria-label="Controls">
       <div className="controls-grid">
         <label className="field">
-          <span>Business objective</span>
+          <span>What should improve most?</span>
           <select
             data-testid="objective-select"
             value={objective}
             onChange={(event) => onObjectiveChange(event.target.value as Objective)}
           >
-            <option value="task_success">Maximize task success</option>
-            <option value="safe_value">Maximize safety-adjusted value</option>
+            <option value="task_success">Successful responses</option>
+            <option value="safe_value">Safety-adjusted value</option>
           </select>
         </label>
 
         <label className="field">
-          <span>Segment policy by</span>
+          <span>Where can policy differ?</span>
           <select
             data-testid="segment-select"
             value={segmentBy}
             onChange={(event) => onSegmentByChange(event.target.value as SegmentBy)}
           >
-            <option value="none">None</option>
-            <option value="prompt_risk">Prompt risk</option>
+            <option value="prompt_risk">Prompt risk level</option>
             <option value="device_tier">Device tier</option>
-            <option value="task_domain">Task domain</option>
+            <option value="task_domain">Task type</option>
+            <option value="none">Do not segment</option>
           </select>
         </label>
 
         <label className="field">
-          <span>Max guardrail level: {maxPolicyLevel}</span>
+          <span>Maximum allowed strictness: L{maxPolicyLevel}</span>
           <input
             data-testid="policy-slider"
             type="range"
@@ -63,6 +71,7 @@ export function Controls({
             value={maxPolicyLevel}
             onChange={(event) => onMaxPolicyLevelChange(Number(event.target.value))}
           />
+          <small className="field-help">{POLICY_HINTS[maxPolicyLevel]}</small>
         </label>
       </div>
 
@@ -73,7 +82,7 @@ export function Controls({
         onClick={onGenerate}
         disabled={loading}
       >
-        {loading ? "Analyzing logs..." : hasResults ? "Recompute policy" : "Generate policy"}
+        {loading ? "Running analysis..." : hasResults ? "Update recommendation" : "Generate policy"}
       </button>
     </section>
   );

@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-test("policy generation renders minimal decision UI", async ({ page }) => {
+test("policy generation explains process and returns actionable recommendation", async ({ page }) => {
   await page.goto("/");
 
+  await expect(page.getByTestId("story-panel")).toBeVisible();
   await page.getByTestId("generate-policy").click();
 
   await expect(page.getByTestId("results-block")).toBeVisible();
@@ -14,5 +15,5 @@ test("policy generation renders minimal decision UI", async ({ page }) => {
   await expect(page.getByTestId("apply-policy")).toBeVisible();
 
   const recommendation = await page.getByTestId("recommendation-line").innerText();
-  expect(recommendation.length).toBeGreaterThan(20);
+  expect(recommendation).toContain("Recommendation:");
 });
