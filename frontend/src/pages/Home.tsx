@@ -39,7 +39,8 @@ interface ImpactScore {
   incidentsAvoidedPer10k: number;
   incidentsAvoidedWeekly: number;
   latencyDelta: number;
-  whyLine: string;
+  noAiCostLine: string;
+  nextActionLine: string;
 }
 
 const DEFAULT_MAX_POLICY_LEVEL = 3;
@@ -136,8 +137,39 @@ function chooseDecision(
   return {
     tone: "hold",
     status: "HOLD",
-    line: `Decision: HOLD. Under current constraints this is not safer than naive to deploy at full traffic.`
+    line: "Decision: HOLD. Under current constraints this is not safer than naive to deploy at full traffic."
   };
+}
+
+function buildNoAiCostLine(objectiveUnit: string, objectiveLiftWeekly: number, incidentsAvoidedWeekly: number): string {
+  const objectiveMagnitude = formatInteger(Math.abs(objectiveLiftWeekly));
+  const incidentsMagnitude = formatInteger(Math.abs(incidentsAvoidedWeekly));
+
+  if (objectiveLiftWeekly > 0 && incidentsAvoidedWeekly > 0) {
+    return `Without AI optimization, keeping naive is projected to lose ${objectiveMagnitude} ${objectiveUnit}/week and add ${incidentsMagnitude} incidents/week.`;
+  }
+
+  if (objectiveLiftWeekly > 0) {
+    return `Without AI optimization, keeping naive is projected to lose ${objectiveMagnitude} ${objectiveUnit}/week.`;
+  }
+
+  if (incidentsAvoidedWeekly > 0) {
+    return `Without AI optimization, keeping naive is projected to add ${incidentsMagnitude} incidents/week.`;
+  }
+
+  return "Current model does not show practical advantage over naive under these constraints; hold until constraints/features change.";
+}
+
+function buildNextActionLine(decision: DecisionSummary): string {
+  if (decision.status === "SHIP") {
+    return "Next action: import bundle into policy service, run 10% canary for 24h, then ramp to 100% if gates hold.";
+  }
+
+  if (decision.status === "PILOT") {
+    return "Next action: run a 10% pilot only; monitor safety and latency gates before any ramp-up.";
+  }
+
+  return "Next action: keep naive policy in production and review feature coverage before re-running.";
 }
 
 function exportPolicyBundle(params: {
@@ -159,6 +191,13 @@ function exportPolicyBundle(params: {
       summary: score.decision.line,
       policy: policyLine
     },
+    practical_value: {
+      no_ai_cost: score.noAiCostLine,
+      next_action: score.nextActionLine,
+      objective_delta_weekly: Number(score.objectiveLiftWeekly.toFixed(0)),
+      incidents_avoided_weekly: Number(score.incidentsAvoidedWeekly.toFixed(0)),
+      latency_delta_ms: Number(score.latencyDelta.toFixed(2))
+    },
     inputs: {
       objective,
       segment_by: segmentBy,
@@ -173,13 +212,6 @@ function exportPolicyBundle(params: {
       segment: segment.segment,
       policy_level: segment.recommended_policy_level
     })),
-    expected_impact_vs_naive: {
-      objective_delta_per_10k: Number(score.objectiveLiftPer10k.toFixed(2)),
-      objective_delta_weekly: Number(score.objectiveLiftWeekly.toFixed(0)),
-      incidents_avoided_per_10k: Number(score.incidentsAvoidedPer10k.toFixed(2)),
-      incidents_avoided_weekly: Number(score.incidentsAvoidedWeekly.toFixed(0)),
-      latency_delta_ms: Number(score.latencyDelta.toFixed(2))
-    },
     rollout_gates: [
       "Keep rollout if objective delta vs naive remains >= 0 over trailing 24h.",
       "Keep rollout only if incidents avoided vs naive remains >= 0 over trailing 24h.",
@@ -262,12 +294,12 @@ export function Home(): JSX.Element {
   }, [runAnalysis]);
 
   const score = useMemo<ImpactScore | null>(() => {
-    if (!results.naive || !results.dr) {
+    if (!naiveResult || !drResult) {
       return null;
     }
 
-    const naive = rollupMethod(results.naive);
-    const dr = rollupMethod(results.dr);
+    const naive = rollupMethod(naiveResult);
+    const dr = rollupMethod(drResult);
 
     const objectiveLiftPer10k = objective === "task_success" ? dr.successes - naive.successes : dr.safeValue - naive.safeValue;
     const objectiveLabel = objective === "task_success" ? "Weekly successful responses" : "Weekly safety-adjusted value";
@@ -289,16 +321,17 @@ export function Home(): JSX.Element {
       incidentsAvoidedPer10k,
       incidentsAvoidedWeekly,
       latencyDelta,
-      whyLine: `Export includes deployment-ready rules plus rollout gates and rollback triggers.`
+      noAiCostLine: buildNoAiCostLine(objectiveUnit, objectiveLiftWeekly, incidentsAvoidedWeekly),
+      nextActionLine: buildNextActionLine(decision)
     };
-  }, [objective, results.dr, results.naive]);
+  }, [drResult, naiveResult, objective]);
 
   const policyLine = useMemo(() => {
-    if (!results.dr) {
+    if (!drResult) {
       return null;
     }
-    return buildPolicyLine(segmentBy, results.dr);
-  }, [segmentBy, results.dr]);
+    return buildPolicyLine(segmentBy, drResult);
+  }, [drResult, segmentBy]);
 
   return (
     <main className="page-shell">
@@ -306,8 +339,8 @@ export function Home(): JSX.Element {
         <p className="eyebrow">EdgeAlign-DR</p>
         <h1>Auto-running policy recommendation</h1>
         <p className="hero-copy" data-testid="single-story">
-          We automatically compare naive vs bias-adjusted guardrail policies from historical logs and output the safest,
-          highest-impact policy you can ship now.
+          Without AI you ship the naive policy from biased logs; this auto-run computes a safer, higher-impact policy and
+          gives a deployable bundle.
         </p>
       </header>
 
@@ -354,6 +387,16 @@ export function Home(): JSX.Element {
             {policyLine}
           </p>
 
+          <section className="utility-card" data-testid="utility-card">
+            <p className="utility-title">Practical value this week</p>
+            <p className="result-footnote" data-testid="no-ai-line">
+              {score.noAiCostLine}
+            </p>
+            <p className="result-footnote" data-testid="next-action-line">
+              {score.nextActionLine}
+            </p>
+          </section>
+
           <div className="kpi-row">
             <article className="kpi-card" data-testid="kpi-objective">
               <p>{score.objectiveLabel}</p>
@@ -370,10 +413,6 @@ export function Home(): JSX.Element {
               <strong>{signed(score.latencyDelta, 1)}</strong>
             </article>
           </div>
-
-          <p className="result-footnote" data-testid="result-footnote">
-            {score.whyLine}
-          </p>
 
           <button
             type="button"

@@ -214,6 +214,22 @@ h1 {
   color: var(--muted);
 }
 
+.utility-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f9fbfd;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.utility-title {
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #0b4f60;
+}
+
 .empty-state {
   padding: 13px 15px;
   color: var(--muted);
