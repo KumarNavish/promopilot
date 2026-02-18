@@ -4,7 +4,8 @@ test("auto AI run shows pipeline, recommendation, and export action", async ({ p
   await page.goto("/");
 
   await expect(page.getByTestId("single-story")).toContainText("doubly-robust counterfactual simulation");
-  await expect(page.getByTestId("version-chip")).toContainText("value-v5");
+  await expect(page.getByTestId("build-proof")).toContainText("value-v6");
+  await expect(page.getByTestId("version-chip")).toContainText("value-v6");
 
   await expect(page.getByTestId("run-panel")).toBeVisible();
   await expect(page.getByTestId("run-step-0")).toBeVisible();

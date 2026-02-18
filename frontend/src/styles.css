@@ -73,6 +73,18 @@ h1 {
   color: #1e293b;
 }
 
+.build-proof {
+  margin: 0;
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #0b4f60;
+  font-size: 0.83rem;
+  font-weight: 700;
+  width: fit-content;
+}
+
 .version-chip {
   margin: 0;
   width: fit-content;

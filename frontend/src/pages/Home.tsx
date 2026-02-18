@@ -26,7 +26,7 @@ const DEMO_SEGMENT_BY: SegmentBy = "prompt_risk";
 const DEMO_MAX_POLICY_LEVEL = 4;
 const WEEKLY_REQUESTS = 5_000_000;
 const INCIDENT_COST_USD = 2500;
-const UI_VERSION = "value-v5";
+const UI_VERSION = "value-v6";
 
 const RUN_STAGES = [
   "Reweight biased logs with propensity model",
@@ -248,9 +248,12 @@ export function Home(): JSX.Element {
     <main className="page-shell">
       <header className="panel hero" data-testid="hero">
         <p className="eyebrow">Counterfactual AI Runner</p>
-        <h1>Bias-adjusted policy run</h1>
+        <h1>Bias-adjusted policy run (live)</h1>
         <p className="hero-copy" data-testid="single-story">
           On load, this demo runs a doubly-robust counterfactual simulation on biased logs and returns the one policy to ship.
+        </p>
+        <p className="build-proof" data-testid="build-proof">
+          Live build marker: value-v6
         </p>
         <p className="version-chip" data-testid="version-chip">
           UI version: {UI_VERSION}
