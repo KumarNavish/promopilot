@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ApiError,
   Objective,
@@ -65,10 +65,10 @@ export function Home(): JSX.Element {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<{ naive?: RecommendResponse; dr?: RecommendResponse }>({});
   const [error, setError] = useState<UiError | null>(null);
-  const [hasAutoRun, setHasAutoRun] = useState(false);
 
   const hasResults = Boolean(results.naive && results.dr);
   const appliedPolicy = results.dr ?? results.naive ?? null;
+  const baselineDiscount = appliedPolicy?.baseline.discount_pct ?? 10;
 
   const scorecard = useMemo(() => {
     if (!results.naive || !results.dr) {
@@ -86,6 +86,8 @@ export function Home(): JSX.Element {
       objectiveDigits: objective === "bookings" ? 1 : 0,
       objectiveLabel: objective === "bookings" ? "bookings" : "net value",
       discountDelta: dr.avgDiscount - naive.avgDiscount,
+      optimizedAvgDiscount: dr.avgDiscount,
+      currentAvgDiscount: naive.avgDiscount,
       monthlyNetValueDelta,
       annualNetValueDelta: monthlyNetValueDelta * 12,
       relativeDiscountReduction
@@ -97,18 +99,26 @@ export function Home(): JSX.Element {
       return "";
     }
 
+    const strategy =
+      segmentBy === "none"
+        ? "Use one optimized discount policy for all users"
+        : `Use optimized discounts by ${segmentBy.replace("_", " ")}`;
+
+    const objectiveDirection = scorecard.objectiveDelta >= 0 ? "increase" : "decrease";
+    const objectiveMagnitude = Math.abs(scorecard.objectiveDelta);
+
     if (scorecard.objectiveDelta >= 0 && scorecard.discountDelta <= 0) {
-      return `Recommendation: launch bias-adjusted policy now. It outperforms naive policy while reducing discount intensity by ${Math.max(
-        scorecard.relativeDiscountReduction,
+      return `${strategy}. Expected to ${objectiveDirection} ${scorecard.objectiveLabel} by ${objectiveMagnitude.toFixed(
+        scorecard.objectiveDigits
+      )} per 10k while reducing discount intensity by ${Math.max(scorecard.relativeDiscountReduction, 0).toFixed(
         0
-      ).toFixed(0)}% and adds ${formatCurrency(scorecard.annualNetValueDelta)} annual net value at 1M users/month.`;
+      )}% (annual net value impact: ${formatCurrency(scorecard.annualNetValueDelta)}).`;
     }
 
-    return `Recommendation: launch bias-adjusted policy with guardrails. Expected impact is ${signed(
-      scorecard.objectiveDelta,
+    return `${strategy} with guardrails. Expected ${objectiveDirection} in ${scorecard.objectiveLabel} of ${objectiveMagnitude.toFixed(
       scorecard.objectiveDigits
-    )} ${scorecard.objectiveLabel} per 10k and ${formatCurrency(scorecard.annualNetValueDelta)} annual net value delta at 1M users/month.`;
-  }, [scorecard]);
+    )} per 10k and annual net value impact of ${formatCurrency(scorecard.annualNetValueDelta)}.`;
+  }, [scorecard, segmentBy]);
 
   const handleGenerate = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -145,21 +155,12 @@ export function Home(): JSX.Element {
     }
   }, [maxDiscountPct, objective, segmentBy]);
 
-  useEffect(() => {
-    if (hasAutoRun) {
-      return;
-    }
-
-    setHasAutoRun(true);
-    void handleGenerate();
-  }, [handleGenerate, hasAutoRun]);
-
   return (
     <main className="page-shell">
       <header className="hero panel minimal-hero">
         <p className="eyebrow">PromoPilot</p>
         <h1>Promotion Policy Decision</h1>
-        <p className="hero-copy">Get one recommendation and the business impact.</p>
+        <p className="hero-copy">Step 2: click Get recommendation. We compare your current policy against an optimized one.</p>
       </header>
 
       <Controls
@@ -174,7 +175,11 @@ export function Home(): JSX.Element {
         hasResults={hasResults}
       />
 
-      {loading && !hasResults ? <p className="loading-line">Running first simulation for you...</p> : null}
+      {loading ? (
+        <p className="loading-line" data-testid="loading-line">
+          Running simulation: current policy vs optimized policy...
+        </p>
+      ) : null}
 
       {error ? (
         <p className="error-line" data-testid="error-line">
@@ -188,6 +193,11 @@ export function Home(): JSX.Element {
           <section className="panel compact-result" data-testid="recommendation-panel">
             <p className="recommendation-line" data-testid="recommendation-line">
               {recommendationLine}
+            </p>
+            <p className="recommendation-context" data-testid="recommendation-context">
+              Comparison baseline: current policy at {baselineDiscount}% default discount (observed avg {scorecard.currentAvgDiscount.toFixed(
+                1
+              )}%) versus optimized avg {scorecard.optimizedAvgDiscount.toFixed(1)}%.
             </p>
 
             <div className="compact-kpis">
@@ -218,8 +228,8 @@ export function Home(): JSX.Element {
         </section>
       ) : (
         <section className="panel empty-state">
-          <p className="narrative-title">No recommendation yet</p>
-          <p>Generate policy to get a launch decision.</p>
+          <p className="narrative-title">Ready when you are</p>
+          <p>Set your preferences above and click Get recommendation.</p>
         </section>
       )}
     </main>

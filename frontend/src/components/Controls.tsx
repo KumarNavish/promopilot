@@ -25,10 +25,10 @@ export function Controls({
 }: ControlsProps): JSX.Element {
   return (
     <section className="panel controls-panel" aria-label="Controls">
-      <p className="controls-intro">Set the objective and constraints, then recompute to compare policy behavior.</p>
+      <p className="controls-intro">Step 1: choose your goal and guardrails.</p>
       <div className="controls-grid">
         <label className="field">
-          <span>Business objective</span>
+          <span>What should we optimize?</span>
           <select
             data-testid="objective-select"
             value={objective}
@@ -40,7 +40,7 @@ export function Controls({
         </label>
 
         <label className="field">
-          <span>User segmentation</span>
+          <span>Should discounts vary by</span>
           <select
             data-testid="segment-select"
             value={segmentBy}
@@ -54,7 +54,7 @@ export function Controls({
         </label>
 
         <label className="field">
-          <span>Max allowed discount: {maxDiscountPct}%</span>
+          <span>Highest discount we can offer: {maxDiscountPct}%</span>
           <input
             data-testid="discount-slider"
             type="range"
@@ -74,7 +74,7 @@ export function Controls({
         onClick={onGenerate}
         disabled={loading}
       >
-        {loading ? "Computing..." : hasResults ? "Recompute policy" : "Generate policy"}
+        {loading ? "Analyzing..." : hasResults ? "Update recommendation" : "Get recommendation"}
       </button>
     </section>
   );

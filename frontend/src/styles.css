@@ -65,6 +65,12 @@ body {
   font-weight: 600;
 }
 
+.recommendation-context {
+  margin: 0;
+  color: #3e5f66;
+  font-size: 0.88rem;
+}
+
 .compact-kpis {
   display: grid;
   gap: 10px;
@@ -659,8 +665,13 @@ th {
 
 .loading-line {
   margin: 12px 0 0;
-  color: #305057;
+  color: #204a51;
   font-weight: 600;
+  background: #e8f4f2;
+  border: 1px solid #cfe3de;
+  border-radius: 10px;
+  padding: 9px 12px;
+  display: inline-block;
 }
 
 .error-line {
