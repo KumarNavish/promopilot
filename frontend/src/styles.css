@@ -46,6 +46,11 @@ body {
   align-items: stretch;
 }
 
+.minimal-hero {
+  flex-direction: column;
+  gap: 6px;
+}
+
 .hero-copy-block {
   flex: 1.05;
 }
@@ -371,9 +376,31 @@ th {
 
 .row-actions {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   gap: 12px;
+}
+
+.details-panel {
+  padding: 0;
+}
+
+.details-panel summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 13px 14px;
+  font-weight: 600;
+  color: #16464f;
+}
+
+.details-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.details-content {
+  display: grid;
+  gap: 14px;
+  padding: 0 14px 14px;
 }
 
 .before-after-panel {
@@ -561,7 +588,7 @@ th {
   margin-top: 10px;
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .move-card {

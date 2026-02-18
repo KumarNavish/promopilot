@@ -9,7 +9,7 @@ test("policy generation and method divergence", async ({ page }) => {
   await expect(page.getByTestId("recommendation-panel")).toBeVisible();
   await expect(page.getByTestId("shift-panel")).toBeVisible();
 
-  await page.getByTestId("toggle-diagnostics").click();
+  await page.getByTestId("details-panel").locator("summary").click();
   await expect(page.getByTestId("before-after-strip")).toBeVisible();
   await expect(page.getByTestId("policy-card-naive")).toBeVisible();
   await expect(page.getByTestId("policy-card-dr")).toBeVisible();
