@@ -13,14 +13,28 @@ interface UiError {
   requestId?: string;
 }
 
-const DEFAULT_MAX_DISCOUNT = 15;
-const MONTHLY_TRAFFIC_BASE = 1_000_000;
-
 interface MethodRollup {
   bookings: number;
   netValue: number;
   avgDiscount: number;
 }
+
+interface SegmentMove {
+  segment: string;
+  naiveDiscount: number;
+  drDiscount: number;
+  discountDelta: number;
+  netValueDelta: number;
+}
+
+interface DecisionSummary {
+  headline: string;
+  support: string;
+  scopeLabel: string;
+}
+
+const DEFAULT_MAX_DISCOUNT = 15;
+const MONTHLY_TRAFFIC_BASE = 1_000_000;
 
 function exportPolicy(response: RecommendResponse | null): void {
   if (!response) {
@@ -46,6 +60,28 @@ function rollupMethod(response: RecommendResponse): MethodRollup {
   return { bookings, netValue, avgDiscount };
 }
 
+function computeSegmentMoves(naive: RecommendResponse, dr: RecommendResponse): SegmentMove[] {
+  const naiveMap = new Map(naive.segments.map((segment) => [segment.segment, segment]));
+
+  return dr.segments
+    .map((segment): SegmentMove | null => {
+      const before = naiveMap.get(segment.segment);
+      if (!before) {
+        return null;
+      }
+
+      return {
+        segment: segment.segment,
+        naiveDiscount: before.recommended_discount_pct,
+        drDiscount: segment.recommended_discount_pct,
+        discountDelta: segment.recommended_discount_pct - before.recommended_discount_pct,
+        netValueDelta: segment.expected_net_value_per_10k - before.expected_net_value_per_10k
+      };
+    })
+    .filter((move): move is SegmentMove => Boolean(move))
+    .sort((a, b) => Math.abs(b.discountDelta) - Math.abs(a.discountDelta));
+}
+
 function signed(value: number, digits = 1): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
 }
@@ -68,7 +104,6 @@ export function Home(): JSX.Element {
 
   const hasResults = Boolean(results.naive && results.dr);
   const appliedPolicy = results.dr ?? results.naive ?? null;
-  const baselineDiscount = appliedPolicy?.baseline.discount_pct ?? 10;
 
   const scorecard = useMemo(() => {
     if (!results.naive || !results.dr) {
@@ -77,47 +112,52 @@ export function Home(): JSX.Element {
 
     const naive = rollupMethod(results.naive);
     const dr = rollupMethod(results.dr);
-    const relativeDiscountReduction =
-      naive.avgDiscount > 0 ? ((naive.avgDiscount - dr.avgDiscount) / naive.avgDiscount) * 100 : 0;
-    const monthlyNetValueDelta = ((dr.netValue - naive.netValue) * MONTHLY_TRAFFIC_BASE) / 10_000;
+    const objectiveDelta = objective === "bookings" ? dr.bookings - naive.bookings : dr.netValue - naive.netValue;
+    const annualNetValueDelta = ((dr.netValue - naive.netValue) * MONTHLY_TRAFFIC_BASE * 12) / 10_000;
 
     return {
-      objectiveDelta: objective === "bookings" ? dr.bookings - naive.bookings : dr.netValue - naive.netValue,
+      objectiveDelta,
       objectiveDigits: objective === "bookings" ? 1 : 0,
       objectiveLabel: objective === "bookings" ? "bookings" : "net value",
       discountDelta: dr.avgDiscount - naive.avgDiscount,
-      optimizedAvgDiscount: dr.avgDiscount,
+      annualNetValueDelta,
       currentAvgDiscount: naive.avgDiscount,
-      monthlyNetValueDelta,
-      annualNetValueDelta: monthlyNetValueDelta * 12,
-      relativeDiscountReduction
+      optimizedAvgDiscount: dr.avgDiscount
     };
   }, [objective, results.dr, results.naive]);
 
-  const recommendationLine = useMemo(() => {
+  const moves = useMemo(() => {
+    if (!results.naive || !results.dr) {
+      return [];
+    }
+    return computeSegmentMoves(results.naive, results.dr).slice(0, 3);
+  }, [results.dr, results.naive]);
+
+  const decision = useMemo((): DecisionSummary | null => {
     if (!scorecard) {
-      return "";
+      return null;
     }
 
-    const strategy =
-      segmentBy === "none"
-        ? "Use one optimized discount policy for all users"
-        : `Use optimized discounts by ${segmentBy.replace("_", " ")}`;
-
-    const objectiveDirection = scorecard.objectiveDelta >= 0 ? "increase" : "decrease";
-    const objectiveMagnitude = Math.abs(scorecard.objectiveDelta);
+    const scopeLabel = segmentBy === "none" ? "all users" : segmentBy.replace("_", " ");
+    const objectiveMagnitude = Math.abs(scorecard.objectiveDelta).toFixed(scorecard.objectiveDigits);
 
     if (scorecard.objectiveDelta >= 0 && scorecard.discountDelta <= 0) {
-      return `${strategy}. Expected to ${objectiveDirection} ${scorecard.objectiveLabel} by ${objectiveMagnitude.toFixed(
-        scorecard.objectiveDigits
-      )} per 10k while reducing discount intensity by ${Math.max(scorecard.relativeDiscountReduction, 0).toFixed(
-        0
-      )}% (annual net value impact: ${formatCurrency(scorecard.annualNetValueDelta)}).`;
+      return {
+        headline: "Recommendation: switch to optimized discount strategy.",
+        support: `For ${scopeLabel}, expected lift is ${objectiveMagnitude} ${scorecard.objectiveLabel} per 10k while average discount drops ${Math.abs(
+          scorecard.discountDelta
+        ).toFixed(1)} pp. Annual net value impact: ${formatCurrency(scorecard.annualNetValueDelta)}.`,
+        scopeLabel
+      };
     }
 
-    return `${strategy} with guardrails. Expected ${objectiveDirection} in ${scorecard.objectiveLabel} of ${objectiveMagnitude.toFixed(
-      scorecard.objectiveDigits
-    )} per 10k and annual net value impact of ${formatCurrency(scorecard.annualNetValueDelta)}.`;
+    return {
+      headline: "Recommendation: run a controlled rollout of optimized strategy.",
+      support: `For ${scopeLabel}, expected impact is ${signed(scorecard.objectiveDelta, scorecard.objectiveDigits)} ${
+        scorecard.objectiveLabel
+      } per 10k with annual net value impact ${formatCurrency(scorecard.annualNetValueDelta)}.`,
+      scopeLabel
+    };
   }, [scorecard, segmentBy]);
 
   const handleGenerate = useCallback(async (): Promise<void> => {
@@ -159,25 +199,30 @@ export function Home(): JSX.Element {
     <main className="page-shell">
       <header className="hero panel minimal-hero">
         <p className="eyebrow">PromoPilot</p>
-        <h1>Promotion Policy Decision</h1>
-        <p className="hero-copy">Step 2: click Get recommendation. We compare your current policy against an optimized one.</p>
+        <h1>Should we change our discount strategy?</h1>
+        <p className="hero-copy">Pick assumptions, run analysis, then apply the recommended policy.</p>
       </header>
 
-      <Controls
-        objective={objective}
-        maxDiscountPct={maxDiscountPct}
-        segmentBy={segmentBy}
-        onObjectiveChange={setObjective}
-        onMaxDiscountChange={setMaxDiscountPct}
-        onSegmentByChange={setSegmentBy}
-        onGenerate={handleGenerate}
-        loading={loading}
-        hasResults={hasResults}
-      />
+      <details className="panel assumptions-panel" open={!hasResults}>
+        <summary data-testid="assumptions-summary">Step 1: set assumptions</summary>
+        <div className="assumptions-body">
+          <Controls
+            objective={objective}
+            maxDiscountPct={maxDiscountPct}
+            segmentBy={segmentBy}
+            onObjectiveChange={setObjective}
+            onMaxDiscountChange={setMaxDiscountPct}
+            onSegmentByChange={setSegmentBy}
+            onGenerate={handleGenerate}
+            loading={loading}
+            hasResults={hasResults}
+          />
+        </div>
+      </details>
 
       {loading ? (
         <p className="loading-line" data-testid="loading-line">
-          Running simulation: current policy vs optimized policy...
+          Step 2: comparing current policy versus optimized policy...
         </p>
       ) : null}
 
@@ -188,26 +233,24 @@ export function Home(): JSX.Element {
         </p>
       ) : null}
 
-      {hasResults && scorecard ? (
+      {hasResults && scorecard && decision ? (
         <section className="results-stack" data-testid="results-block">
           <section className="panel compact-result" data-testid="recommendation-panel">
             <p className="recommendation-line" data-testid="recommendation-line">
-              {recommendationLine}
+              {decision.headline}
             </p>
             <p className="recommendation-context" data-testid="recommendation-context">
-              Comparison baseline: current policy at {baselineDiscount}% default discount (observed avg {scorecard.currentAvgDiscount.toFixed(
-                1
-              )}%) versus optimized avg {scorecard.optimizedAvgDiscount.toFixed(1)}%.
+              {decision.support}
             </p>
 
             <div className="compact-kpis">
               <article>
-                <p>Primary objective lift</p>
+                <p>Primary KPI lift (per 10k)</p>
                 <strong data-testid="kpi-objective">{signed(scorecard.objectiveDelta, scorecard.objectiveDigits)}</strong>
               </article>
               <article>
-                <p>Discount intensity reduction</p>
-                <strong data-testid="kpi-discount">{Math.max(scorecard.relativeDiscountReduction, 0).toFixed(0)}%</strong>
+                <p>Average discount change</p>
+                <strong data-testid="kpi-discount">{signed(scorecard.discountDelta)} pp</strong>
               </article>
               <article>
                 <p>Annual net value impact</p>
@@ -225,11 +268,29 @@ export function Home(): JSX.Element {
               Apply policy
             </button>
           </section>
+
+          <section className="panel move-panel" data-testid="moves-panel">
+            <h3>What will change</h3>
+            <ul className="simple-list">
+              {moves.length > 0 ? (
+                moves.map((move) => (
+                  <li key={`move-${move.segment}`}>
+                    {move.segment}: {move.naiveDiscount}% to {move.drDiscount}% ({signed(move.discountDelta)} pp), net value {signed(
+                      move.netValueDelta,
+                      0
+                    )} per 10k.
+                  </li>
+                ))
+              ) : (
+                <li>No segment-level discount changes for these assumptions.</li>
+              )}
+            </ul>
+          </section>
         </section>
       ) : (
         <section className="panel empty-state">
-          <p className="narrative-title">Ready when you are</p>
-          <p>Set your preferences above and click Get recommendation.</p>
+          <p className="narrative-title">Ready to evaluate</p>
+          <p>Run the analysis to get a recommendation.</p>
         </section>
       )}
     </main>

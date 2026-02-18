@@ -151,13 +151,8 @@ h1 {
 }
 
 .controls-panel {
-  padding: 18px;
-}
-
-.controls-intro {
-  margin: 0 0 12px;
-  color: var(--muted);
-  font-size: 0.9rem;
+  display: grid;
+  gap: 12px;
 }
 
 .controls-grid {
@@ -220,6 +215,32 @@ h1 {
   margin-top: 16px;
   display: grid;
   gap: 14px;
+}
+
+.assumptions-panel {
+  margin-top: 8px;
+  padding: 0;
+}
+
+.assumptions-panel summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 12px 14px;
+  font-weight: 600;
+  color: #19474f;
+  border-bottom: 1px solid transparent;
+}
+
+.assumptions-panel[open] summary {
+  border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+
+.assumptions-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.assumptions-body {
+  padding: 12px 14px 14px;
 }
 
 .recommendation-panel {
@@ -672,6 +693,26 @@ th {
   border-radius: 10px;
   padding: 9px 12px;
   display: inline-block;
+}
+
+.move-panel {
+  padding: 14px;
+}
+
+.move-panel h3 {
+  margin: 0;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.simple-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #355159;
+}
+
+.simple-list li {
+  margin: 7px 0 0;
+  line-height: 1.35;
 }
 
 .error-line {

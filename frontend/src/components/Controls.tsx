@@ -24,8 +24,7 @@ export function Controls({
   hasResults
 }: ControlsProps): JSX.Element {
   return (
-    <section className="panel controls-panel" aria-label="Controls">
-      <p className="controls-intro">Step 1: choose your goal and guardrails.</p>
+    <section className="controls-panel" aria-label="Controls">
       <div className="controls-grid">
         <label className="field">
           <span>What should we optimize?</span>
@@ -40,7 +39,7 @@ export function Controls({
         </label>
 
         <label className="field">
-          <span>Should discounts vary by</span>
+          <span>Allow discount differences by</span>
           <select
             data-testid="segment-select"
             value={segmentBy}
@@ -54,7 +53,7 @@ export function Controls({
         </label>
 
         <label className="field">
-          <span>Highest discount we can offer: {maxDiscountPct}%</span>
+          <span>Maximum discount allowed: {maxDiscountPct}%</span>
           <input
             data-testid="discount-slider"
             type="range"
