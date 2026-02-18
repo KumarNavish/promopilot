@@ -188,6 +188,17 @@ h1 {
   font-size: 0.9rem;
 }
 
+.policy-diff-line {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #dbeafe;
+  background: #f8fbff;
+  color: #1e3a5f;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
 .kpi-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, Objective, RecommendResponse, SegmentBy, recommendPolicy } from "../api/client";
+import { ApiError, DoseResponsePoint, Objective, RecommendResponse, SegmentBy, recommendPolicy } from "../api/client";
 
 interface UiError {
   message: string;
@@ -12,27 +12,34 @@ interface MethodRollup {
   latency: number;
 }
 
+type PolicyMap = Record<string, number>;
+
 interface ImpactScore {
   recommendationLine: string;
   evidenceLine: string;
+  policyDiffLine: string;
   successLiftWeekly: number;
   incidentsAvoidedWeekly: number;
   riskCostImpactUsdWeekly: number;
   latencyDeltaMs: number;
+  aiPolicy: PolicyMap;
+  naivePolicy: PolicyMap;
 }
 
 const DEMO_OBJECTIVE: Objective = "task_success";
-const DEMO_SEGMENT_BY: SegmentBy = "prompt_risk";
-const DEMO_MAX_POLICY_LEVEL = 4;
+const DEMO_SEGMENT_BY: SegmentBy = "task_domain";
+const DEMO_MAX_POLICY_LEVEL = 2;
 const WEEKLY_REQUESTS = 5_000_000;
 const INCIDENT_COST_USD = 2500;
-const UI_VERSION = "value-v6";
+const INCIDENT_UTILITY_PENALTY = 4;
+const LATENCY_UTILITY_PENALTY = 0;
+const UI_VERSION = "value-v7";
 
 const RUN_STAGES = [
   "Reweight biased logs with propensity model",
   "Estimate outcomes for every policy level",
-  "Compute doubly-robust counterfactual value",
-  "Select highest-value policy under constraints"
+  "Search policy actions with DR utility",
+  "Select highest-value constrained policy"
 ] as const;
 
 function formatInteger(value: number): string {
@@ -60,47 +67,98 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-function rollupMethod(response: RecommendResponse): MethodRollup {
-  const count = Math.max(response.segments.length, 1);
-  const successes = response.segments.reduce((acc, segment) => acc + segment.expected_successes_per_10k, 0) / count;
-  const incidents = response.segments.reduce((acc, segment) => acc + segment.expected_incidents_per_10k, 0) / count;
-  const latency = response.segments.reduce((acc, segment) => acc + segment.expected_latency_ms, 0) / count;
+function cleanSegment(segment: string): string {
+  return segment.replace("=", " ").replace(/_/g, " ");
+}
 
+function utility(point: DoseResponsePoint): number {
+  return point.successes_per_10k - INCIDENT_UTILITY_PENALTY * point.incidents_per_10k - LATENCY_UTILITY_PENALTY * point.latency_ms;
+}
+
+function optimizePolicy(response: RecommendResponse): PolicyMap {
+  const policy: PolicyMap = {};
+
+  for (const segment of response.dose_response) {
+    const candidates = segment.points.filter((point) => point.policy_level <= DEMO_MAX_POLICY_LEVEL);
+    if (candidates.length === 0) {
+      continue;
+    }
+
+    let best = candidates[0];
+    for (const point of candidates.slice(1)) {
+      if (utility(point) > utility(best)) {
+        best = point;
+      }
+    }
+
+    policy[segment.segment] = best.policy_level;
+  }
+
+  return policy;
+}
+
+function evaluatePolicy(response: RecommendResponse, policy: PolicyMap): MethodRollup {
+  let successes = 0;
+  let incidents = 0;
+  let latency = 0;
+  let count = 0;
+
+  for (const segment of response.dose_response) {
+    const selectedLevel = policy[segment.segment];
+    const selected = segment.points.find((point) => point.policy_level === selectedLevel) ?? segment.points[0];
+    if (!selected) {
+      continue;
+    }
+
+    successes += selected.successes_per_10k;
+    incidents += selected.incidents_per_10k;
+    latency += selected.latency_ms;
+    count += 1;
+  }
+
+  const safeCount = Math.max(count, 1);
   return {
-    successes,
-    incidents,
-    latency
+    successes: successes / safeCount,
+    incidents: incidents / safeCount,
+    latency: latency / safeCount
   };
 }
 
-function readRiskPolicy(response: RecommendResponse, risk: "low" | "medium" | "high"): number | null {
-  const match = response.segments.find((segment) => segment.segment.toLowerCase() === `risk=${risk}`);
-  return match ? match.recommended_policy_level : null;
+function buildPolicyPhrase(policy: PolicyMap): string {
+  const parts = Object.entries(policy)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([segment, level]) => `${cleanSegment(segment)} -> L${level}`);
+
+  return parts.join(" | ");
 }
 
-function buildPolicyPhrase(response: RecommendResponse): string {
-  const low = readRiskPolicy(response, "low");
-  const medium = readRiskPolicy(response, "medium");
-  const high = readRiskPolicy(response, "high");
+function buildPolicyDiffLine(naivePolicy: PolicyMap, aiPolicy: PolicyMap): string {
+  const segments = Object.keys(aiPolicy).sort();
+  const changed = segments
+    .filter((segment) => naivePolicy[segment] !== aiPolicy[segment])
+    .map((segment) => `${cleanSegment(segment)} L${naivePolicy[segment]} -> L${aiPolicy[segment]}`);
 
-  if (low !== null && medium !== null && high !== null) {
-    return `L${low} for low-risk prompts, L${medium} for medium-risk prompts, L${high} for high-risk prompts`;
+  if (changed.length === 0) {
+    return "Policy updates vs naive: none (gains come from better counterfactual ranking).";
   }
 
-  const fallback = response.segments
-    .slice(0, 3)
-    .map((segment) => `${segment.segment} -> L${segment.recommended_policy_level}`)
-    .join(" | ");
+  return `Policy updates vs naive: ${changed.join(" | ")}.`;
+}
 
-  return fallback || "no policy available";
+function policyToRules(policy: PolicyMap): Array<{ segment: string; policy_level: number }> {
+  return Object.entries(policy)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([segment, level]) => ({
+      segment,
+      policy_level: level
+    }));
 }
 
 function exportPolicyBundle(params: {
-  naive: RecommendResponse;
   dr: RecommendResponse;
   score: ImpactScore;
 }): void {
-  const { naive, dr, score } = params;
+  const { dr, score } = params;
 
   const bundle = {
     generated_at_utc: new Date().toISOString(),
@@ -111,26 +169,25 @@ function exportPolicyBundle(params: {
       segment_by: DEMO_SEGMENT_BY,
       max_policy_level: DEMO_MAX_POLICY_LEVEL
     },
+    optimizer: {
+      incident_utility_penalty: INCIDENT_UTILITY_PENALTY,
+      latency_utility_penalty: LATENCY_UTILITY_PENALTY
+    },
     assumptions: {
       weekly_requests: WEEKLY_REQUESTS,
       incident_cost_usd: INCIDENT_COST_USD
     },
     recommendation: score.recommendationLine,
     evidence: score.evidenceLine,
+    policy_updates: score.policyDiffLine,
     impact_vs_naive_weekly: {
       successful_responses: Math.round(score.successLiftWeekly),
       incidents_avoided: Math.round(score.incidentsAvoidedWeekly),
       risk_cost_impact_usd: Math.round(score.riskCostImpactUsdWeekly),
       latency_delta_ms: Number(score.latencyDeltaMs.toFixed(2))
     },
-    recommended_rules: dr.segments.map((segment) => ({
-      segment: segment.segment,
-      policy_level: segment.recommended_policy_level
-    })),
-    naive_reference_rules: naive.segments.map((segment) => ({
-      segment: segment.segment,
-      policy_level: segment.recommended_policy_level
-    }))
+    recommended_rules: policyToRules(score.aiPolicy),
+    naive_reference_rules: policyToRules(score.naivePolicy)
   };
 
   const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
@@ -161,7 +218,7 @@ export function Home(): JSX.Element {
     setCompletedStage(-1);
 
     try {
-      await delay(140);
+      await delay(120);
       setCompletedStage(0);
       setActiveStage(1);
 
@@ -179,17 +236,17 @@ export function Home(): JSX.Element {
         method: "dr"
       });
 
-      await delay(140);
+      await delay(120);
       setCompletedStage(1);
       setActiveStage(2);
 
       const [naive, dr] = await Promise.all([naivePromise, drPromise]);
 
-      await delay(140);
+      await delay(120);
       setCompletedStage(2);
       setActiveStage(3);
 
-      await delay(120);
+      await delay(100);
       setResults({ naive, dr });
       setCompletedStage(3);
       setActiveStage(-1);
@@ -221,24 +278,36 @@ export function Home(): JSX.Element {
       return null;
     }
 
-    const naive = rollupMethod(naiveResult);
-    const dr = rollupMethod(drResult);
+    const naivePolicy = optimizePolicy(naiveResult);
+    const aiPolicy = optimizePolicy(drResult);
+
+    const naiveEvalByDr = evaluatePolicy(drResult, naivePolicy);
+    const aiEvalByDr = evaluatePolicy(drResult, aiPolicy);
 
     const weeklyFactor = WEEKLY_REQUESTS / 10_000;
-    const successLiftWeekly = (dr.successes - naive.successes) * weeklyFactor;
-    const incidentsAvoidedWeekly = (naive.incidents - dr.incidents) * weeklyFactor;
-    const latencyDeltaMs = dr.latency - naive.latency;
+    const successLiftWeekly = (aiEvalByDr.successes - naiveEvalByDr.successes) * weeklyFactor;
+    const incidentsAvoidedWeekly = (naiveEvalByDr.incidents - aiEvalByDr.incidents) * weeklyFactor;
+    const latencyDeltaMs = aiEvalByDr.latency - naiveEvalByDr.latency;
     const riskCostImpactUsdWeekly = incidentsAvoidedWeekly * INCIDENT_COST_USD;
 
-    const scenariosEvaluated = drResult.dose_response.reduce((acc, segment) => acc + segment.points.length, 0);
+    const scenariosEvaluated = drResult.dose_response.reduce((acc, segment) => {
+      const available = segment.points.filter((point) => point.policy_level <= DEMO_MAX_POLICY_LEVEL).length;
+      return acc + available;
+    }, 0);
+
+    const totalSegments = Object.keys(aiPolicy).length;
+    const changedRules = Object.keys(aiPolicy).filter((segment) => aiPolicy[segment] !== naivePolicy[segment]).length;
 
     return {
-      recommendationLine: `AI recommendation: ${buildPolicyPhrase(drResult)}.`,
-      evidenceLine: `Counterfactual engine evaluated ${formatInteger(scenariosEvaluated)} segment-policy outcomes and selected the highest-value policy under L${DEMO_MAX_POLICY_LEVEL}.`,
+      recommendationLine: `AI recommendation: ${buildPolicyPhrase(aiPolicy)}.`,
+      evidenceLine: `Counterfactual search scored ${formatInteger(scenariosEvaluated)} actions and changed ${changedRules}/${totalSegments} segment rules vs naive policy search.`,
+      policyDiffLine: buildPolicyDiffLine(naivePolicy, aiPolicy),
       successLiftWeekly,
       incidentsAvoidedWeekly,
       riskCostImpactUsdWeekly,
-      latencyDeltaMs
+      latencyDeltaMs,
+      aiPolicy,
+      naivePolicy
     };
   }, [naiveResult, drResult]);
 
@@ -248,12 +317,12 @@ export function Home(): JSX.Element {
     <main className="page-shell">
       <header className="panel hero" data-testid="hero">
         <p className="eyebrow">Counterfactual AI Runner</p>
-        <h1>Bias-adjusted policy run (live)</h1>
+        <h1>Policy action search (live)</h1>
         <p className="hero-copy" data-testid="single-story">
-          On load, this demo runs a doubly-robust counterfactual simulation on biased logs and returns the one policy to ship.
+          On load, this demo runs a doubly-robust policy search over segment-level actions and outputs the highest-value policy to ship.
         </p>
         <p className="build-proof" data-testid="build-proof">
-          Live build marker: value-v6
+          Live build marker: value-v7
         </p>
         <p className="version-chip" data-testid="version-chip">
           UI version: {UI_VERSION}
@@ -288,7 +357,7 @@ export function Home(): JSX.Element {
         </p>
       ) : null}
 
-      {hasResults && score && naiveResult && drResult ? (
+      {hasResults && score && drResult ? (
         <section className="panel result-panel" data-testid="results-block">
           <p className="recommendation-line" data-testid="recommendation-line">
             {score.recommendationLine}
@@ -296,15 +365,18 @@ export function Home(): JSX.Element {
           <p className="evidence-line" data-testid="evidence-line">
             {score.evidenceLine}
           </p>
+          <p className="policy-diff-line" data-testid="policy-diff-line">
+            {score.policyDiffLine}
+          </p>
 
           <div className="kpi-row">
             <article className="kpi-card" data-testid="kpi-success">
-              <p>Weekly successful responses vs naive</p>
+              <p>Weekly successful responses vs naive optimizer</p>
               <strong>{formatSignedInteger(score.successLiftWeekly)}</strong>
             </article>
 
             <article className="kpi-card" data-testid="kpi-incidents">
-              <p>Weekly incidents avoided vs naive</p>
+              <p>Weekly incidents avoided vs naive optimizer</p>
               <strong>{formatSignedInteger(score.incidentsAvoidedWeekly)}</strong>
             </article>
 
@@ -319,13 +391,12 @@ export function Home(): JSX.Element {
             className="button-primary"
             onClick={() =>
               exportPolicyBundle({
-                naive: naiveResult,
                 dr: drResult,
                 score
               })
             }
             data-testid="apply-policy"
-            disabled={!naiveResult || !drResult}
+            disabled={!drResult}
           >
             Apply policy (export JSON)
           </button>
