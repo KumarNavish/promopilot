@@ -12,9 +12,16 @@ interface MethodRollup {
   safeValue: number;
 }
 
+interface PolicyProjection {
+  successes: number;
+  incidents: number;
+  riskCostUsd: number;
+}
+
 type PolicyMap = Record<string, number>;
 
 type OperatingMode = "reliability" | "throughput";
+type Horizon = "week" | "quarter" | "year";
 
 interface ModeConfig {
   label: string;
@@ -23,18 +30,29 @@ interface ModeConfig {
   incidentPenalty: number;
 }
 
+interface HorizonConfig {
+  label: string;
+  kpiPrefix: string;
+  weeks: number;
+}
+
 interface ImpactScore {
   recommendationLine: string;
-  successLiftWeekly: number;
-  incidentsAvoidedWeekly: number;
-  riskCostImpactUsdWeekly: number;
+  usefulnessLine: string;
+  policyDiffLine: string;
+  successLift: number;
+  incidentsAvoided: number;
+  riskCostImpactUsd: number;
   aiPolicy: PolicyMap;
   naivePolicy: PolicyMap;
+  aiProjection: PolicyProjection;
+  naiveProjection: PolicyProjection;
 }
 
 const DEMO_SEGMENT_BY: SegmentBy = "task_domain";
 const DEFAULT_WEEKLY_REQUESTS = 5_000_000;
 const DEFAULT_INCIDENT_COST_USD = 2500;
+const HOURS_PER_INCIDENT = 2.2;
 
 const MODE_CONFIGS: Record<OperatingMode, ModeConfig> = {
   reliability: {
@@ -51,6 +69,24 @@ const MODE_CONFIGS: Record<OperatingMode, ModeConfig> = {
   }
 };
 
+const HORIZON_CONFIGS: Record<Horizon, HorizonConfig> = {
+  week: {
+    label: "1 week",
+    kpiPrefix: "Weekly",
+    weeks: 1
+  },
+  quarter: {
+    label: "1 quarter",
+    kpiPrefix: "Quarterly",
+    weeks: 13
+  },
+  year: {
+    label: "1 year",
+    kpiPrefix: "Annual",
+    weeks: 52
+  }
+};
+
 function formatInteger(value: number): string {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0
@@ -61,13 +97,16 @@ function formatSignedInteger(value: number): string {
   return `${value >= 0 ? "+" : "-"}${formatInteger(Math.abs(value))}`;
 }
 
-function formatSignedCurrency(value: number): string {
-  const abs = new Intl.NumberFormat("en-US", {
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     maximumFractionDigits: 0
-  }).format(Math.abs(value));
-  return `${value >= 0 ? "+" : "-"}${abs}`;
+  }).format(value);
+}
+
+function formatSignedCurrency(value: number): string {
+  return `${value >= 0 ? "+" : "-"}${formatCurrency(Math.abs(value))}`;
 }
 
 function cleanSegment(segment: string): string {
@@ -138,6 +177,19 @@ function buildPolicyPhrase(policy: PolicyMap): string {
     .join(", ");
 }
 
+function buildPolicyDiffLine(naivePolicy: PolicyMap, aiPolicy: PolicyMap): string {
+  const changed = Object.keys(aiPolicy)
+    .sort()
+    .filter((segment) => aiPolicy[segment] !== naivePolicy[segment])
+    .map((segment) => `${cleanSegment(segment)} L${naivePolicy[segment]} -> L${aiPolicy[segment]}`);
+
+  if (changed.length === 0) {
+    return "Policy changes vs naive: none; gains come from better counterfactual ranking.";
+  }
+
+  return `Policy changes vs naive: ${changed.join(" | ")}.`;
+}
+
 function policyToRules(policy: PolicyMap): Array<{ segment: string; policy_level: number }> {
   return Object.entries(policy)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -147,34 +199,71 @@ function policyToRules(policy: PolicyMap): Array<{ segment: string; policy_level
     }));
 }
 
+function useAnimatedNumber(target: number, animationKey: string, durationMs = 650): number {
+  const [value, setValue] = useState(target);
+  const previousTargetRef = useRef(target);
+
+  useEffect(() => {
+    const startValue = previousTargetRef.current;
+    const start = performance.now();
+    const delta = target - startValue;
+    let frameId = 0;
+
+    const tick = (now: number) => {
+      const progress = Math.min((now - start) / durationMs, 1);
+      const eased = 1 - (1 - progress) ** 3;
+      setValue(startValue + delta * eased);
+
+      if (progress < 1) {
+        frameId = window.requestAnimationFrame(tick);
+      } else {
+        previousTargetRef.current = target;
+      }
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [animationKey, durationMs, target]);
+
+  return value;
+}
+
 function exportPolicyBundle(params: {
   dr: RecommendResponse;
   score: ImpactScore;
   mode: OperatingMode;
+  horizon: Horizon;
   weeklyRequests: number;
   incidentCostUsd: number;
 }): void {
-  const { dr, score, mode, weeklyRequests, incidentCostUsd } = params;
-  const config = MODE_CONFIGS[mode];
+  const { dr, score, mode, horizon, weeklyRequests, incidentCostUsd } = params;
+  const modeConfig = MODE_CONFIGS[mode];
+  const horizonConfig = HORIZON_CONFIGS[horizon];
 
   const bundle = {
     generated_at_utc: new Date().toISOString(),
     artifact_version: dr.artifact_version,
     scenario: {
       mode,
-      mode_label: config.label,
-      objective: config.objective,
+      mode_label: modeConfig.label,
+      horizon,
+      horizon_label: horizonConfig.label,
+      objective: modeConfig.objective,
       segment_by: DEMO_SEGMENT_BY,
-      max_policy_level: config.maxPolicyLevel,
-      incident_penalty: config.incidentPenalty,
+      max_policy_level: modeConfig.maxPolicyLevel,
+      incident_penalty: modeConfig.incidentPenalty,
       weekly_requests: weeklyRequests,
       incident_cost_usd: incidentCostUsd
     },
     recommendation: score.recommendationLine,
-    impact_vs_naive_weekly: {
-      successful_responses: Math.round(score.successLiftWeekly),
-      incidents_avoided: Math.round(score.incidentsAvoidedWeekly),
-      risk_cost_impact_usd: Math.round(score.riskCostImpactUsdWeekly)
+    operational_usefulness: score.usefulnessLine,
+    impact_vs_naive: {
+      successful_outcomes: Math.round(score.successLift),
+      incidents_avoided: Math.round(score.incidentsAvoided),
+      risk_cost_impact_usd: Math.round(score.riskCostImpactUsd)
     },
     recommended_rules: policyToRules(score.aiPolicy),
     naive_reference_rules: policyToRules(score.naivePolicy)
@@ -192,13 +281,16 @@ function exportPolicyBundle(params: {
 
 export function Home(): JSX.Element {
   const [mode, setMode] = useState<OperatingMode>("reliability");
+  const [horizon, setHorizon] = useState<Horizon>("week");
   const [weeklyRequests, setWeeklyRequests] = useState<number>(DEFAULT_WEEKLY_REQUESTS);
   const [incidentCostUsd, setIncidentCostUsd] = useState<number>(DEFAULT_INCIDENT_COST_USD);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<{ naive?: RecommendResponse; dr?: RecommendResponse }>({});
   const [error, setError] = useState<UiError | null>(null);
+  const [replayTick, setReplayTick] = useState(0);
 
-  const config = MODE_CONFIGS[mode];
+  const modeConfig = MODE_CONFIGS[mode];
+  const horizonConfig = HORIZON_CONFIGS[horizon];
 
   const runAnalysis = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -207,14 +299,14 @@ export function Home(): JSX.Element {
     try {
       const [naive, dr] = await Promise.all([
         recommendPolicy({
-          objective: config.objective,
-          max_policy_level: config.maxPolicyLevel,
+          objective: modeConfig.objective,
+          max_policy_level: modeConfig.maxPolicyLevel,
           segment_by: DEMO_SEGMENT_BY,
           method: "naive"
         }),
         recommendPolicy({
-          objective: config.objective,
-          max_policy_level: config.maxPolicyLevel,
+          objective: modeConfig.objective,
+          max_policy_level: modeConfig.maxPolicyLevel,
           segment_by: DEMO_SEGMENT_BY,
           method: "dr"
         })
@@ -233,7 +325,7 @@ export function Home(): JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, [config.maxPolicyLevel, config.objective]);
+  }, [modeConfig.maxPolicyLevel, modeConfig.objective]);
 
   const autoRunRef = useRef(false);
   useEffect(() => {
@@ -251,34 +343,70 @@ export function Home(): JSX.Element {
       return null;
     }
 
-    const naivePolicy = optimizePolicy(results.naive, config.objective, config.maxPolicyLevel, config.incidentPenalty);
-    const aiPolicy = optimizePolicy(results.dr, config.objective, config.maxPolicyLevel, config.incidentPenalty);
+    const naivePolicy = optimizePolicy(results.naive, modeConfig.objective, modeConfig.maxPolicyLevel, modeConfig.incidentPenalty);
+    const aiPolicy = optimizePolicy(results.dr, modeConfig.objective, modeConfig.maxPolicyLevel, modeConfig.incidentPenalty);
 
     const naiveEvalByDr = evaluatePolicy(results.dr, naivePolicy);
     const aiEvalByDr = evaluatePolicy(results.dr, aiPolicy);
 
-    const weeklyFactor = weeklyRequests / 10_000;
-    const successLiftWeekly = (aiEvalByDr.successes - naiveEvalByDr.successes) * weeklyFactor;
-    const incidentsAvoidedWeekly = (naiveEvalByDr.incidents - aiEvalByDr.incidents) * weeklyFactor;
-    const riskCostImpactUsdWeekly = incidentsAvoidedWeekly * incidentCostUsd;
+    const trafficFactor = (weeklyRequests / 10_000) * horizonConfig.weeks;
+
+    const naiveProjection: PolicyProjection = {
+      successes: naiveEvalByDr.successes * trafficFactor,
+      incidents: naiveEvalByDr.incidents * trafficFactor,
+      riskCostUsd: naiveEvalByDr.incidents * trafficFactor * incidentCostUsd
+    };
+
+    const aiProjection: PolicyProjection = {
+      successes: aiEvalByDr.successes * trafficFactor,
+      incidents: aiEvalByDr.incidents * trafficFactor,
+      riskCostUsd: aiEvalByDr.incidents * trafficFactor * incidentCostUsd
+    };
+
+    const successLift = aiProjection.successes - naiveProjection.successes;
+    const incidentsAvoided = naiveProjection.incidents - aiProjection.incidents;
+    const riskCostImpactUsd = naiveProjection.riskCostUsd - aiProjection.riskCostUsd;
 
     const policyPhrase = buildPolicyPhrase(aiPolicy);
     const incidentPhrase =
-      incidentsAvoidedWeekly >= 0
-        ? `${formatInteger(incidentsAvoidedWeekly)} fewer incidents`
-        : `${formatInteger(Math.abs(incidentsAvoidedWeekly))} additional incidents`;
+      incidentsAvoided >= 0
+        ? `${formatInteger(incidentsAvoided)} fewer incidents`
+        : `${formatInteger(Math.abs(incidentsAvoided))} additional incidents`;
+
+    const reclaimedHours = incidentsAvoided * HOURS_PER_INCIDENT;
+    const hoursPhrase =
+      reclaimedHours >= 0
+        ? `${formatInteger(reclaimedHours)} engineer-hours reclaimed`
+        : `${formatInteger(Math.abs(reclaimedHours))} extra engineer-hours consumed`;
 
     return {
-      recommendationLine: `Ship now: ${policyPhrase}. This bias-adjusted policy is projected to deliver ${formatSignedInteger(
-        successLiftWeekly
-      )} successful outcomes/week with ${incidentPhrase} vs naive targeting.`,
-      successLiftWeekly,
-      incidentsAvoidedWeekly,
-      riskCostImpactUsdWeekly,
+      recommendationLine: `Ship now: ${policyPhrase}. In ${horizonConfig.label}, this bias-adjusted policy projects ${formatSignedInteger(
+        successLift
+      )} successful outcomes with ${incidentPhrase} vs naive targeting.`,
+      usefulnessLine: `Practical impact: ${formatSignedCurrency(riskCostImpactUsd)} incident-cost change and ${hoursPhrase}.`,
+      policyDiffLine: buildPolicyDiffLine(naivePolicy, aiPolicy),
+      successLift,
+      incidentsAvoided,
+      riskCostImpactUsd,
       aiPolicy,
-      naivePolicy
+      naivePolicy,
+      aiProjection,
+      naiveProjection
     };
-  }, [config.incidentPenalty, config.maxPolicyLevel, config.objective, incidentCostUsd, results.dr, results.naive, weeklyRequests]);
+  }, [horizonConfig.label, horizonConfig.weeks, incidentCostUsd, modeConfig.incidentPenalty, modeConfig.maxPolicyLevel, modeConfig.objective, results.dr, results.naive, weeklyRequests]);
+
+  const animationKey = `${mode}|${horizon}|${weeklyRequests}|${incidentCostUsd}|${replayTick}`;
+  const animatedSuccessLift = useAnimatedNumber(score?.successLift ?? 0, animationKey);
+  const animatedIncidentsAvoided = useAnimatedNumber(score?.incidentsAvoided ?? 0, animationKey);
+  const animatedRiskCost = useAnimatedNumber(score?.riskCostImpactUsd ?? 0, animationKey);
+  const animatedNaiveIncidents = useAnimatedNumber(score?.naiveProjection.incidents ?? 0, animationKey);
+  const animatedAiIncidents = useAnimatedNumber(score?.aiProjection.incidents ?? 0, animationKey);
+  const animatedNaiveSuccess = useAnimatedNumber(score?.naiveProjection.successes ?? 0, animationKey);
+  const animatedAiSuccess = useAnimatedNumber(score?.aiProjection.successes ?? 0, animationKey);
+
+  const incidentBarMax = Math.max(score?.naiveProjection.incidents ?? 0, score?.aiProjection.incidents ?? 0, 1);
+  const naiveIncidentWidth = ((score?.naiveProjection.incidents ?? 0) / incidentBarMax) * 100;
+  const aiIncidentWidth = ((score?.aiProjection.incidents ?? 0) / incidentBarMax) * 100;
 
   const weeklyRequestsMillions = weeklyRequests / 1_000_000;
 
@@ -288,7 +416,7 @@ export function Home(): JSX.Element {
         <p className="eyebrow">Counterfactual policy runner</p>
         <h1>One-click AI policy optimizer</h1>
         <p className="hero-copy" data-testid="single-story">
-          This demo auto-runs on load, corrects biased logs, and outputs the highest-value policy to ship this week.
+          This demo auto-runs on load, corrects biased logs, and shows the exact policy that moves both reliability and business value.
         </p>
       </header>
 
@@ -311,6 +439,23 @@ export function Home(): JSX.Element {
         </div>
 
         <div className="field">
+          <p className="field-label">Time horizon</p>
+          <div className="mode-toggle" role="tablist" aria-label="Time horizon">
+            {(["week", "quarter", "year"] as Horizon[]).map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={`mode-pill ${horizon === option ? "active" : ""}`}
+                onClick={() => setHorizon(option)}
+                data-testid={`horizon-${option}`}
+              >
+                {HORIZON_CONFIGS[option].label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="field">
           <label className="field-label" htmlFor="weekly-requests">
             Weekly traffic: {weeklyRequestsMillions.toFixed(1)}M requests
           </label>
@@ -326,7 +471,7 @@ export function Home(): JSX.Element {
           />
         </div>
 
-        <div className="field">
+        <div className="field span-two">
           <label className="field-label" htmlFor="incident-cost">
             Incident cost: ${formatInteger(incidentCostUsd)} each
           </label>
@@ -361,21 +506,61 @@ export function Home(): JSX.Element {
           <p className="recommendation-line" data-testid="recommendation-line">
             {score.recommendationLine}
           </p>
+          <p className="usefulness-line" data-testid="usefulness-line">
+            {score.usefulnessLine}
+          </p>
+          <p className="policy-diff-line" data-testid="policy-diff-line">
+            {score.policyDiffLine}
+          </p>
+
+          <section className="impact-strip" data-testid="impact-strip">
+            <div className="impact-strip-header">
+              <p>Before vs after simulation ({horizonConfig.label})</p>
+              <button
+                type="button"
+                className="replay-button"
+                onClick={() => setReplayTick((prev) => prev + 1)}
+                data-testid="replay-simulation"
+              >
+                Replay simulation
+              </button>
+            </div>
+
+            <div className="impact-grid">
+              <article className="impact-card naive" data-testid="naive-card">
+                <p className="impact-card-title">Naive targeting</p>
+                <p className="impact-card-metric">Successful outcomes: {formatInteger(animatedNaiveSuccess)}</p>
+                <p className="impact-card-metric">Incidents: {formatInteger(animatedNaiveIncidents)}</p>
+                <div className="impact-meter" aria-hidden="true">
+                  <span style={{ width: `${naiveIncidentWidth}%` }} />
+                </div>
+              </article>
+
+              <article className="impact-card ai" data-testid="ai-card">
+                <p className="impact-card-title">Bias-adjusted policy</p>
+                <p className="impact-card-metric">Successful outcomes: {formatInteger(animatedAiSuccess)}</p>
+                <p className="impact-card-metric">Incidents: {formatInteger(animatedAiIncidents)}</p>
+                <div className="impact-meter" aria-hidden="true">
+                  <span style={{ width: `${aiIncidentWidth}%` }} />
+                </div>
+              </article>
+            </div>
+          </section>
 
           <div className="kpi-row">
             <article className="kpi-card" data-testid="kpi-success">
-              <p>Weekly successful outcomes vs naive</p>
-              <strong>{formatSignedInteger(score.successLiftWeekly)}</strong>
+              <p>{horizonConfig.kpiPrefix} successful outcomes vs naive</p>
+              <strong>{formatSignedInteger(animatedSuccessLift)}</strong>
             </article>
 
             <article className="kpi-card" data-testid="kpi-incidents">
-              <p>Weekly incidents avoided vs naive</p>
-              <strong>{formatSignedInteger(score.incidentsAvoidedWeekly)}</strong>
+              <p>{horizonConfig.kpiPrefix} incidents avoided vs naive</p>
+              <strong>{formatSignedInteger(animatedIncidentsAvoided)}</strong>
             </article>
 
             <article className="kpi-card" data-testid="kpi-risk-cost">
-              <p>Weekly risk cost impact</p>
-              <strong>{formatSignedCurrency(score.riskCostImpactUsdWeekly)}</strong>
+              <p>{horizonConfig.kpiPrefix} risk cost impact</p>
+              <strong>{formatSignedCurrency(animatedRiskCost)}</strong>
             </article>
           </div>
 
@@ -387,6 +572,7 @@ export function Home(): JSX.Element {
                 dr: results.dr!,
                 score,
                 mode,
+                horizon,
                 weeklyRequests,
                 incidentCostUsd
               })
