@@ -35,7 +35,7 @@ export function Controls({
     <section className="controls-panel" aria-label="Controls">
       <div className="controls-grid">
         <label className="field">
-          <span>What should improve most?</span>
+          <span>Goal</span>
           <select
             data-testid="objective-select"
             value={objective}
@@ -47,21 +47,21 @@ export function Controls({
         </label>
 
         <label className="field">
-          <span>Where can policy differ?</span>
+          <span>Segment by</span>
           <select
             data-testid="segment-select"
             value={segmentBy}
             onChange={(event) => onSegmentByChange(event.target.value as SegmentBy)}
           >
-            <option value="prompt_risk">Prompt risk level</option>
+            <option value="prompt_risk">Prompt risk</option>
             <option value="device_tier">Device tier</option>
             <option value="task_domain">Task type</option>
-            <option value="none">Do not segment</option>
+            <option value="none">No segmentation</option>
           </select>
         </label>
 
         <label className="field">
-          <span>Maximum allowed strictness: L{maxPolicyLevel}</span>
+          <span>Max strictness: L{maxPolicyLevel}</span>
           <input
             data-testid="policy-slider"
             type="range"
@@ -82,7 +82,7 @@ export function Controls({
         onClick={onGenerate}
         disabled={loading}
       >
-        {loading ? "Running analysis..." : hasResults ? "Update recommendation" : "Generate policy"}
+        {loading ? "Running..." : hasResults ? "Run again" : "Run now"}
       </button>
     </section>
   );

@@ -23,11 +23,6 @@ interface MethodRollup {
 }
 
 const DEFAULT_MAX_POLICY_LEVEL = 3;
-const RUN_STAGES = [
-  "Reading historical on-device traffic",
-  "Removing targeting bias in logged policies",
-  "Selecting best policy level for each segment"
-] as const;
 
 function exportPolicy(response: RecommendResponse | null): void {
   if (!response) {
@@ -104,7 +99,7 @@ function buildWhyLine(
   latencyDelta: number
 ): string {
   const objectiveName = objective === "task_success" ? "successful responses" : "safety-adjusted value";
-  return `Why this is better: naive would run average level ${naive.avgPolicyLevel.toFixed(2)}, while bias-adjusted runs ${dr.avgPolicyLevel.toFixed(2)} and improves ${objectiveName} by ${signed(objectiveLift, 1)} per 10k, with incidents ${signed(incidentsAvoided, 1)} lower and latency ${signed(latencyDelta, 1)} ms.`;
+  return `Bias-adjusted policy beats naive: average level ${naive.avgPolicyLevel.toFixed(2)} -> ${dr.avgPolicyLevel.toFixed(2)}, ${objectiveName} ${signed(objectiveLift, 1)} per 10k, incidents ${signed(incidentsAvoided, 1)}, latency ${signed(latencyDelta, 1)} ms.`;
 }
 
 export function Home(): JSX.Element {
@@ -112,22 +107,58 @@ export function Home(): JSX.Element {
   const [maxPolicyLevel, setMaxPolicyLevel] = useState<number>(DEFAULT_MAX_POLICY_LEVEL);
   const [segmentBy, setSegmentBy] = useState<SegmentBy>("prompt_risk");
   const [loading, setLoading] = useState(false);
-  const [runStage, setRunStage] = useState(0);
+  const [autoLoaded, setAutoLoaded] = useState(false);
   const [results, setResults] = useState<{ naive?: RecommendResponse; dr?: RecommendResponse }>({});
   const [error, setError] = useState<UiError | null>(null);
 
-  const stageTimerRef = useRef<number | null>(null);
+  const autoRunRef = useRef(false);
 
   const hasResults = Boolean(results.naive && results.dr);
   const appliedPolicy = results.dr ?? null;
 
-  useEffect(() => {
-    return () => {
-      if (stageTimerRef.current !== null) {
-        window.clearInterval(stageTimerRef.current);
+  const runAnalysis = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const [naive, dr] = await Promise.all([
+        recommendPolicy({
+          objective,
+          max_policy_level: maxPolicyLevel,
+          segment_by: segmentBy,
+          method: "naive"
+        }),
+        recommendPolicy({
+          objective,
+          max_policy_level: maxPolicyLevel,
+          segment_by: segmentBy,
+          method: "dr"
+        })
+      ]);
+
+      setResults({ naive, dr });
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError({
+          message: "Could not compute policy. Try again.",
+          requestId: err.requestId
+        });
+      } else {
+        setError({ message: "Could not compute policy. Try again." });
       }
-    };
-  }, []);
+    } finally {
+      setLoading(false);
+      setAutoLoaded(true);
+    }
+  }, [maxPolicyLevel, objective, segmentBy]);
+
+  useEffect(() => {
+    if (autoRunRef.current) {
+      return;
+    }
+    autoRunRef.current = true;
+    void runAnalysis();
+  }, [runAnalysis]);
 
   const score = useMemo(() => {
     if (!results.naive || !results.dr) {
@@ -158,74 +189,16 @@ export function Home(): JSX.Element {
     return buildPolicyLine(segmentBy, results.dr);
   }, [segmentBy, results.dr]);
 
-  const handleGenerate = useCallback(async (): Promise<void> => {
-    setLoading(true);
-    setError(null);
-    setRunStage(0);
-
-    if (stageTimerRef.current !== null) {
-      window.clearInterval(stageTimerRef.current);
-    }
-
-    stageTimerRef.current = window.setInterval(() => {
-      setRunStage((prev) => (prev < RUN_STAGES.length - 1 ? prev + 1 : prev));
-    }, 850);
-
-    try {
-      const [naive, dr] = await Promise.all([
-        recommendPolicy({
-          objective,
-          max_policy_level: maxPolicyLevel,
-          segment_by: segmentBy,
-          method: "naive"
-        }),
-        recommendPolicy({
-          objective,
-          max_policy_level: maxPolicyLevel,
-          segment_by: segmentBy,
-          method: "dr"
-        })
-      ]);
-
-      setResults({ naive, dr });
-    } catch (err) {
-      if (err instanceof ApiError) {
-        setError({
-          message: "Could not compute policy. Try again.",
-          requestId: err.requestId
-        });
-      } else {
-        setError({ message: "Could not compute policy. Try again." });
-      }
-    } finally {
-      if (stageTimerRef.current !== null) {
-        window.clearInterval(stageTimerRef.current);
-        stageTimerRef.current = null;
-      }
-      setRunStage(RUN_STAGES.length - 1);
-      setLoading(false);
-    }
-  }, [maxPolicyLevel, objective, segmentBy]);
-
   return (
     <main className="page-shell">
       <header className="panel hero" data-testid="hero">
         <p className="eyebrow">EdgeAlign-DR</p>
-        <h1>Which guardrail policy should we ship?</h1>
-        <p className="hero-copy">
-          This tool turns biased historical logs into a production recommendation. It automatically decides where to run
-          stricter vs lighter guardrails so you improve outcomes without guessing.
+        <h1>Auto-running policy recommendation</h1>
+        <p className="hero-copy" data-testid="single-story">
+          We automatically compare naive vs bias-adjusted guardrail policies from historical logs and output the safest,
+          highest-impact policy you can ship now.
         </p>
       </header>
-
-      <section className="panel story-panel" data-testid="story-panel">
-        <p className="story-title">What happens when you click "Generate policy"</p>
-        <div className="story-steps" role="list" aria-label="Process overview">
-          <p role="listitem">1. Read real logged traffic and outcomes.</p>
-          <p role="listitem">2. Correct the bias from targeted policy assignment.</p>
-          <p role="listitem">3. Return the policy you can directly ship.</p>
-        </div>
-      </section>
 
       <section className="panel controls-wrap" data-testid="assumptions-panel">
         <Controls
@@ -235,26 +208,22 @@ export function Home(): JSX.Element {
           onObjectiveChange={setObjective}
           onMaxPolicyLevelChange={setMaxPolicyLevel}
           onSegmentByChange={setSegmentBy}
-          onGenerate={handleGenerate}
+          onGenerate={runAnalysis}
           loading={loading}
           hasResults={hasResults}
         />
       </section>
 
       {loading ? (
-        <section className="panel run-panel" data-testid="run-panel">
-          <p className="run-title">Running automatic analysis</p>
-          <ul className="run-steps">
-            {RUN_STAGES.map((stage, index) => {
-              const status = index < runStage ? "done" : index === runStage ? "active" : "pending";
-              return (
-                <li key={stage} className={`run-step ${status}`}>
-                  {stage}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+        <p className="loading-line" data-testid="loading-line">
+          Auto-demo running now...
+        </p>
+      ) : null}
+
+      {!loading && autoLoaded ? (
+        <p className="loading-line done" data-testid="loaded-line">
+          Auto-demo complete. Adjust assumptions and run again if needed.
+        </p>
       ) : null}
 
       {error ? (
@@ -303,7 +272,7 @@ export function Home(): JSX.Element {
         </section>
       ) : (
         <section className="panel empty-state">
-          <p>Ready. Run once to get a ship-ready policy and KPI impact.</p>
+          <p>Preparing recommendation...</p>
         </section>
       )}
     </main>

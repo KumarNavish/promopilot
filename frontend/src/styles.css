@@ -64,37 +64,13 @@ body {
 h1 {
   margin: 0;
   font-family: "Manrope", "Avenir Next", sans-serif;
-  font-size: clamp(1.52rem, 2.8vw, 2.08rem);
+  font-size: clamp(1.5rem, 2.8vw, 2.05rem);
 }
 
 .hero-copy {
   margin: 0;
   color: var(--muted);
   line-height: 1.45;
-  max-width: 80ch;
-}
-
-.story-panel {
-  padding: 14px 16px;
-  display: grid;
-  gap: 8px;
-}
-
-.story-title {
-  margin: 0;
-  font-weight: 700;
-  color: #0c4a5a;
-}
-
-.story-steps {
-  display: grid;
-  gap: 5px;
-}
-
-.story-steps p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.93rem;
 }
 
 .controls-wrap {
@@ -151,38 +127,19 @@ h1 {
   cursor: default;
 }
 
-.run-panel {
-  padding: 14px 16px;
-  display: grid;
-  gap: 8px;
+.loading-line {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid #cce4ec;
   background: var(--accent-soft);
-  border-color: #cce4ec;
-}
-
-.run-title {
-  margin: 0;
-  font-weight: 700;
   color: #0b5566;
-}
-
-.run-steps {
-  margin: 0;
-  padding-left: 18px;
-  display: grid;
-  gap: 4px;
-}
-
-.run-step {
-  color: #64748b;
-  font-size: 0.9rem;
-}
-
-.run-step.active {
-  color: #0f172a;
   font-weight: 600;
 }
 
-.run-step.done {
+.loading-line.done {
+  border-color: #cde4dc;
+  background: #edf8f4;
   color: var(--success);
 }
 
