@@ -1,32 +1,38 @@
-export type Objective = "bookings" | "net_value";
-export type SegmentBy = "none" | "loyalty_tier" | "price_sensitivity" | "device";
+export type Objective = "task_success" | "safe_value";
+export type SegmentBy = "none" | "device_tier" | "prompt_risk" | "task_domain";
 export type Method = "naive" | "dr";
 
 export interface RecommendRequest {
   objective: Objective;
-  max_discount_pct: number;
+  max_policy_level: number;
   segment_by: SegmentBy;
   method: Method;
 }
 
 export interface DeltaVsBaseline {
-  bookings_per_10k: number;
-  net_value_per_10k: number;
-  avg_discount_pct: number;
+  successes_per_10k: number;
+  safe_value_per_10k: number;
+  incidents_per_10k: number;
+  latency_ms: number;
+  avg_policy_level: number;
 }
 
 export interface SegmentRecommendation {
   segment: string;
-  recommended_discount_pct: number;
-  expected_bookings_per_10k: number;
-  expected_net_value_per_10k: number;
+  recommended_policy_level: number;
+  expected_successes_per_10k: number;
+  expected_safe_value_per_10k: number;
+  expected_incidents_per_10k: number;
+  expected_latency_ms: number;
   delta_vs_baseline: DeltaVsBaseline;
 }
 
 export interface DoseResponsePoint {
-  discount_pct: number;
-  bookings_per_10k: number;
-  net_value_per_10k: number;
+  policy_level: number;
+  successes_per_10k: number;
+  safe_value_per_10k: number;
+  incidents_per_10k: number;
+  latency_ms: number;
   ci_low: number;
   ci_high: number;
 }
@@ -43,7 +49,7 @@ export interface RecommendResponse {
   dose_response: SegmentDoseResponse[];
   baseline: {
     name: string;
-    discount_pct: number;
+    policy_level: number;
   };
   warnings: string[];
   request_id?: string;
@@ -51,7 +57,7 @@ export interface RecommendResponse {
 
 interface StaticBundle {
   artifact_version: string;
-  treatment_levels: number[];
+  policy_levels: number[];
   recommendations: Record<string, RecommendResponse>;
 }
 
@@ -67,14 +73,12 @@ export class ApiError extends Error {
 
 const RESPONSE_CACHE = new Map<string, RecommendResponse>();
 const TIMEOUT_MS = 5_000;
-const STATIC_MODE =
-  import.meta.env.VITE_STATIC_MODE === "1" ||
-  window.location.hostname.endsWith("github.io");
+const STATIC_MODE = import.meta.env.VITE_STATIC_MODE === "1" || window.location.hostname.endsWith("github.io");
 
 let staticBundlePromise: Promise<StaticBundle> | null = null;
 
 function cacheKey(payload: RecommendRequest): string {
-  return `${payload.objective}|${payload.max_discount_pct}|${payload.segment_by}|${payload.method}`;
+  return `${payload.objective}|${payload.max_policy_level}|${payload.segment_by}|${payload.method}`;
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<Response> {

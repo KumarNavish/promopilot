@@ -14,7 +14,7 @@ def _build_test_client(tmp_path) -> TestClient:
     artifact_dir = tmp_path / "artifacts"
     build_artifacts(
         artifact_dir=artifact_dir,
-        rows=12000,
+        rows=12_000,
         seed=9,
         artifact_version="test-api",
     )
@@ -37,13 +37,13 @@ def test_schema_validation_rejects_invalid_fields(tmp_path) -> None:
 
     invalid_objective = {
         "objective": "revenue",
-        "max_discount_pct": 10,
+        "max_policy_level": 2,
         "segment_by": "none",
         "method": "dr",
     }
     invalid_segment = {
-        "objective": "bookings",
-        "max_discount_pct": 10,
+        "objective": "task_success",
+        "max_policy_level": 2,
         "segment_by": "region",
         "method": "dr",
     }
@@ -59,9 +59,9 @@ def test_recommendation_latency_with_precomputed_artifacts(tmp_path) -> None:
     client = _build_test_client(tmp_path)
 
     payload = {
-        "objective": "net_value",
-        "max_discount_pct": 15,
-        "segment_by": "loyalty_tier",
+        "objective": "safe_value",
+        "max_policy_level": 3,
+        "segment_by": "prompt_risk",
         "method": "dr",
     }
 

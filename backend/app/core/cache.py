@@ -40,7 +40,7 @@ class ArtifactCache:
             baselines = (
                 json.loads(baseline_path.read_text(encoding="utf-8"))
                 if baseline_path.exists()
-                else {"name": "current_policy", "discount_pct": 10}
+                else {"name": "current_policy", "policy_level": 2}
             )
 
             has_dr = bool(manifest.get("has_dr", True))

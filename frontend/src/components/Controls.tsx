@@ -2,10 +2,10 @@ import { Objective, SegmentBy } from "../api/client";
 
 interface ControlsProps {
   objective: Objective;
-  maxDiscountPct: number;
+  maxPolicyLevel: number;
   segmentBy: SegmentBy;
   onObjectiveChange: (value: Objective) => void;
-  onMaxDiscountChange: (value: number) => void;
+  onMaxPolicyLevelChange: (value: number) => void;
   onSegmentByChange: (value: SegmentBy) => void;
   onGenerate: () => void;
   loading: boolean;
@@ -14,10 +14,10 @@ interface ControlsProps {
 
 export function Controls({
   objective,
-  maxDiscountPct,
+  maxPolicyLevel,
   segmentBy,
   onObjectiveChange,
-  onMaxDiscountChange,
+  onMaxPolicyLevelChange,
   onSegmentByChange,
   onGenerate,
   loading,
@@ -27,41 +27,41 @@ export function Controls({
     <section className="controls-panel" aria-label="Controls">
       <div className="controls-grid">
         <label className="field">
-          <span>What should we optimize?</span>
+          <span>Business objective</span>
           <select
             data-testid="objective-select"
             value={objective}
             onChange={(event) => onObjectiveChange(event.target.value as Objective)}
           >
-            <option value="bookings">Maximize bookings</option>
-            <option value="net_value">Maximize net value</option>
+            <option value="task_success">Maximize task success</option>
+            <option value="safe_value">Maximize safety-adjusted value</option>
           </select>
         </label>
 
         <label className="field">
-          <span>Allow discount differences by</span>
+          <span>Segment policy by</span>
           <select
             data-testid="segment-select"
             value={segmentBy}
             onChange={(event) => onSegmentByChange(event.target.value as SegmentBy)}
           >
             <option value="none">None</option>
-            <option value="loyalty_tier">Loyalty tier</option>
-            <option value="price_sensitivity">Price sensitivity</option>
-            <option value="device">Device</option>
+            <option value="prompt_risk">Prompt risk</option>
+            <option value="device_tier">Device tier</option>
+            <option value="task_domain">Task domain</option>
           </select>
         </label>
 
         <label className="field">
-          <span>Maximum discount allowed: {maxDiscountPct}%</span>
+          <span>Max guardrail level: {maxPolicyLevel}</span>
           <input
-            data-testid="discount-slider"
+            data-testid="policy-slider"
             type="range"
             min={0}
-            max={20}
-            step={5}
-            value={maxDiscountPct}
-            onChange={(event) => onMaxDiscountChange(Number(event.target.value))}
+            max={4}
+            step={1}
+            value={maxPolicyLevel}
+            onChange={(event) => onMaxPolicyLevelChange(Number(event.target.value))}
           />
         </label>
       </div>
@@ -73,7 +73,7 @@ export function Controls({
         onClick={onGenerate}
         disabled={loading}
       >
-        {loading ? "Analyzing..." : hasResults ? "Update recommendation" : "Get recommendation"}
+        {loading ? "Analyzing logs..." : hasResults ? "Recompute policy" : "Generate policy"}
       </button>
     </section>
   );

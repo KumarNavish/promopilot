@@ -10,7 +10,15 @@ from typing import Any, Dict, Iterable
 import joblib
 import pandas as pd
 
-from app.ml.data_schema import BOOKINGS_COL, NET_VALUE_COL, DataSchema, SEGMENT_COLUMNS, validate_dataframe
+from app.ml.data_schema import (
+    INCIDENT_COL,
+    LATENCY_COL,
+    SAFE_VALUE_COL,
+    SEGMENT_COLUMNS,
+    SUCCESS_COL,
+    DataSchema,
+    validate_dataframe,
+)
 from app.ml.dr_estimator import (
     combine_dose_responses,
     estimate_dr_dose_response,
@@ -20,7 +28,14 @@ from app.ml.dr_estimator import (
 )
 from app.ml.synth_data import generate_synthetic_data
 
-DEFAULT_TREATMENT_LEVELS = (0, 5, 10, 15, 20)
+DEFAULT_TREATMENT_LEVELS = (0, 1, 2, 3, 4)
+
+OUTCOMES = {
+    "task_success": SUCCESS_COL,
+    "safe_value": SAFE_VALUE_COL,
+    "safety_incident": INCIDENT_COL,
+    "latency_ms": LATENCY_COL,
+}
 
 
 def _sha256_file(path: Path) -> str:
@@ -43,51 +58,36 @@ def _build_segment_payload(
     outcome_models: Dict[str, Any],
 ) -> Dict[str, Any]:
     segmentations: Dict[str, Any] = {}
+
     for segment_by in SEGMENT_COLUMNS:
-        naive_bookings = estimate_naive_dose_response(
-            df=df,
-            outcome_col=BOOKINGS_COL,
-            segment_by=segment_by,
-            treatment_levels=treatment_levels,
-        )
-        naive_net_value = estimate_naive_dose_response(
-            df=df,
-            outcome_col=NET_VALUE_COL,
-            segment_by=segment_by,
-            treatment_levels=treatment_levels,
-        )
+        dose_inputs: Dict[str, Dict[str, Dict[str, Dict[int, Dict[str, float]]]]] = {}
 
-        dr_bookings = estimate_dr_dose_response(
-            df=df,
-            propensity_model=propensity_model,
-            outcome_model=outcome_models["bookings"],
-            outcome_col=BOOKINGS_COL,
-            segment_by=segment_by,
-            treatment_levels=treatment_levels,
-        )
-        dr_net_value = estimate_dr_dose_response(
-            df=df,
-            propensity_model=propensity_model,
-            outcome_model=outcome_models["net_value"],
-            outcome_col=NET_VALUE_COL,
-            segment_by=segment_by,
-            treatment_levels=treatment_levels,
-        )
+        for outcome_name, outcome_col in OUTCOMES.items():
+            naive_response = estimate_naive_dose_response(
+                df=df,
+                outcome_col=outcome_col,
+                segment_by=segment_by,
+                treatment_levels=treatment_levels,
+            )
+            dr_response = estimate_dr_dose_response(
+                df=df,
+                propensity_model=propensity_model,
+                outcome_model=outcome_models[outcome_name],
+                outcome_col=outcome_col,
+                segment_by=segment_by,
+                treatment_levels=treatment_levels,
+            )
+            dose_inputs[outcome_name] = {
+                "naive": naive_response,
+                "dr": dr_response,
+            }
 
-        combined_naive = combine_dose_responses(
-            bookings_by_method={"naive": naive_bookings},
-            net_value_by_method={"naive": naive_net_value},
-        )["naive"]
-        combined_dr = combine_dose_responses(
-            bookings_by_method={"dr": dr_bookings},
-            net_value_by_method={"dr": dr_net_value},
-        )["dr"]
-
+        combined = combine_dose_responses(dose_inputs)
         segment_payload: Dict[str, Any] = {}
-        for segment_value in combined_naive:
+        for segment_value in combined["naive"]:
             segment_payload[segment_value] = {
-                "naive": combined_naive[segment_value],
-                "dr": combined_dr[segment_value],
+                "naive": combined["naive"][segment_value],
+                "dr": combined["dr"][segment_value],
             }
         segmentations[segment_by] = segment_payload
 
@@ -111,8 +111,8 @@ def build_artifacts(
 
     propensity_model = fit_propensity(df)
     outcome_models = {
-        "bookings": fit_outcome(df, BOOKINGS_COL, seed=seed),
-        "net_value": fit_outcome(df, NET_VALUE_COL, seed=seed + 1),
+        outcome_name: fit_outcome(df, outcome_col, seed=seed + idx + 1)
+        for idx, (outcome_name, outcome_col) in enumerate(OUTCOMES.items())
     }
 
     segmentations = _build_segment_payload(
@@ -125,13 +125,14 @@ def build_artifacts(
     dose_response_payload = {
         "artifact_version": artifact_version,
         "treatment_levels": list(treatment_levels),
-        "baseline": {"name": "current_policy", "discount_pct": 10},
+        "baseline": {"name": "current_policy", "policy_level": 2},
+        "outcomes": list(OUTCOMES.keys()),
         "segmentations": segmentations,
     }
 
     baselines_payload = {
         "name": "current_policy",
-        "discount_pct": 10,
+        "policy_level": 2,
     }
 
     dataset_path = artifact_dir / "demo.parquet"
@@ -179,9 +180,9 @@ def build_artifacts(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train PromoPilot artifacts")
-    parser.add_argument("--rows", type=int, default=60_000)
-    parser.add_argument("--seed", type=int, default=7)
+    parser = argparse.ArgumentParser(description="Train EdgeAlign-DR artifacts")
+    parser.add_argument("--rows", type=int, default=65_000)
+    parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--artifact-version", type=str, default=None)
     parser.add_argument(
         "--artifact-dir",

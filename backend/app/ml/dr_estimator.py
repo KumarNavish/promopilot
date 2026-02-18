@@ -24,7 +24,6 @@ def _make_one_hot_encoder() -> OneHotEncoder:
     try:
         return OneHotEncoder(handle_unknown="ignore", sparse_output=False)
     except TypeError:
-        # Backward compatibility for older scikit-learn builds.
         return OneHotEncoder(handle_unknown="ignore", sparse=False)
 
 
@@ -223,17 +222,25 @@ def estimate_naive_dose_response(
 
 
 def combine_dose_responses(
-    bookings_by_method: Mapping[str, Dict[str, Dict[int, Dict[str, float]]]],
-    net_value_by_method: Mapping[str, Dict[str, Dict[int, Dict[str, float]]]],
+    dose_responses: Mapping[str, Mapping[str, Dict[str, Dict[int, Dict[str, float]]]]]
 ) -> Dict[str, Dict[str, Dict[int, Dict[str, Dict[str, float]]]]]:
-    response: Dict[str, Dict[str, Dict[int, Dict[str, Dict[str, float]]]]] = {}
-    for method, booking_segments in bookings_by_method.items():
-        response[method] = {}
-        for segment_value, booking_treatments in booking_segments.items():
-            response[method][segment_value] = {}
-            for treatment, booking_summary in booking_treatments.items():
-                response[method][segment_value][treatment] = {
-                    "bookings": booking_summary,
-                    "net_value": net_value_by_method[method][segment_value][treatment],
-                }
-    return response
+    """
+    Input shape:
+      outcome_name -> method_name -> segment -> treatment -> summary
+
+    Output shape:
+      method_name -> segment -> treatment -> outcome_name -> summary
+    """
+
+    combined: Dict[str, Dict[str, Dict[int, Dict[str, Dict[str, float]]]]] = {}
+
+    for outcome_name, by_method in dose_responses.items():
+        for method_name, by_segment in by_method.items():
+            method_target = combined.setdefault(method_name, {})
+            for segment_value, by_treatment in by_segment.items():
+                segment_target = method_target.setdefault(segment_value, {})
+                for treatment, summary in by_treatment.items():
+                    treatment_target = segment_target.setdefault(int(treatment), {})
+                    treatment_target[outcome_name] = summary
+
+    return combined

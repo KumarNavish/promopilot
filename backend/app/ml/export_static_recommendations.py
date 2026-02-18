@@ -6,34 +6,34 @@ from typing import Dict, Iterable
 
 from app.ml.policy import recommend_policy
 
-OBJECTIVES = ("bookings", "net_value")
-SEGMENTATIONS = ("none", "loyalty_tier", "price_sensitivity", "device")
+OBJECTIVES = ("task_success", "safe_value")
+SEGMENTATIONS = ("none", "device_tier", "prompt_risk", "task_domain")
 METHODS = ("naive", "dr")
 
 
-def _key(objective: str, max_discount_pct: int, segment_by: str, method: str) -> str:
-    return f"{objective}|{max_discount_pct}|{segment_by}|{method}"
+def _key(objective: str, max_policy_level: int, segment_by: str, method: str) -> str:
+    return f"{objective}|{max_policy_level}|{segment_by}|{method}"
 
 
 def build_static_bundle(
     dose_response_payload: Dict,
-    max_discount_levels: Iterable[int],
+    max_policy_levels: Iterable[int],
 ) -> Dict:
     artifact_version = str(dose_response_payload.get("artifact_version", "unknown"))
     bundle: Dict[str, Dict] = {}
 
     for objective in OBJECTIVES:
-        for max_discount in max_discount_levels:
+        for max_policy_level in max_policy_levels:
             for segment_by in SEGMENTATIONS:
                 for method in METHODS:
                     recommendation = recommend_policy(
                         dose_response=dose_response_payload,
                         objective=objective,
-                        max_discount_pct=int(max_discount),
+                        max_policy_level=int(max_policy_level),
                         segment_by=segment_by,
                         method=method,
                     )
-                    bundle[_key(objective, int(max_discount), segment_by, method)] = {
+                    bundle[_key(objective, int(max_policy_level), segment_by, method)] = {
                         "artifact_version": artifact_version,
                         "method_used": method,
                         "segments": recommendation["segments"],
@@ -44,7 +44,7 @@ def build_static_bundle(
 
     return {
         "artifact_version": artifact_version,
-        "treatment_levels": list(max_discount_levels),
+        "policy_levels": list(max_policy_levels),
         "recommendations": bundle,
     }
 

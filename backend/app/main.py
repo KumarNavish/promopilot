@@ -13,14 +13,14 @@ from app.api.routes import router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 
-request_logger = logging.getLogger("promopilot.request")
+request_logger = logging.getLogger("edgealign.request")
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.app_env)
 
-    app = FastAPI(title="PromoPilot API", version="0.1.0")
+    app = FastAPI(title="EdgeAlign-DR API", version="0.1.0")
 
     @app.middleware("http")
     async def request_context_middleware(request: Request, call_next):

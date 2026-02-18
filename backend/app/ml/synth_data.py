@@ -5,7 +5,13 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-from app.ml.data_schema import BOOKINGS_COL, NET_VALUE_COL, TREATMENT_COL
+from app.ml.data_schema import (
+    INCIDENT_COL,
+    LATENCY_COL,
+    SAFE_VALUE_COL,
+    SUCCESS_COL,
+    TREATMENT_COL,
+)
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:
@@ -19,64 +25,59 @@ def _sigmoid(values: np.ndarray) -> np.ndarray:
 
 
 def generate_synthetic_data(
-    n_rows: int = 60_000,
-    seed: int = 7,
-    treatment_levels: Iterable[int] = (0, 5, 10, 15, 20),
+    n_rows: int = 65_000,
+    seed: int = 17,
+    treatment_levels: Iterable[int] = (0, 1, 2, 3, 4),
 ) -> pd.DataFrame:
-    """Generate a confounded promotional dataset with known treatment response."""
+    """Generate confounded on-device policy logs for a guardrail optimization demo."""
 
     rng = np.random.default_rng(seed)
     levels = np.array(sorted(set(int(x) for x in treatment_levels)), dtype=int)
     if levels.size < 2:
         raise ValueError("At least two treatment levels are required")
 
-    loyalty_tier = rng.choice(["G0", "G1", "G2", "G3"], size=n_rows, p=[0.28, 0.32, 0.25, 0.15])
-    device = rng.choice(["desktop", "mobile", "tablet"], size=n_rows, p=[0.42, 0.48, 0.10])
-    region = rng.choice(["NA", "EU", "APAC", "LATAM"], size=n_rows, p=[0.38, 0.24, 0.24, 0.14])
-    price_sensitivity = rng.choice(["low", "medium", "high"], size=n_rows, p=[0.24, 0.51, 0.25])
-    trip_type = rng.choice(["leisure", "business", "family"], size=n_rows, p=[0.56, 0.22, 0.22])
+    device_tier = rng.choice(["entry", "mid", "premium"], size=n_rows, p=[0.33, 0.46, 0.21])
+    prompt_risk = rng.choice(["low", "medium", "high"], size=n_rows, p=[0.53, 0.32, 0.15])
+    task_domain = rng.choice(["assistant", "code", "support"], size=n_rows, p=[0.45, 0.26, 0.29])
+    region = rng.choice(["NA", "EU", "APAC", "LATAM"], size=n_rows, p=[0.31, 0.26, 0.28, 0.15])
+    connectivity = rng.choice(["offline", "poor", "good"], size=n_rows, p=[0.22, 0.31, 0.47])
 
-    loyalty_score = pd.Series(loyalty_tier).map({"G0": -0.20, "G1": 0.0, "G2": 0.20, "G3": 0.35}).to_numpy()
-    sensitivity_score = pd.Series(price_sensitivity).map({"low": -0.45, "medium": 0.0, "high": 0.55}).to_numpy()
-    device_score = pd.Series(device).map({"desktop": 0.05, "mobile": 0.25, "tablet": 0.10}).to_numpy()
-    region_score = pd.Series(region).map({"NA": 0.18, "EU": 0.08, "APAC": 0.0, "LATAM": -0.08}).to_numpy()
-    trip_score = pd.Series(trip_type).map({"leisure": 0.08, "business": 0.28, "family": 0.04}).to_numpy()
+    prompt_tokens = np.clip(rng.lognormal(mean=5.5, sigma=0.42, size=n_rows), 40, 1150)
+    battery_pct = rng.uniform(8, 100, size=n_rows)
+    thermal_headroom = np.clip(rng.normal(loc=10.5, scale=4.2, size=n_rows), 0.8, 24)
 
-    lead_time = np.clip(rng.gamma(shape=2.2, scale=13.5, size=n_rows) + rng.normal(0, 2, n_rows), 1, 120)
-    nights = rng.integers(1, 9, size=n_rows)
-    search_intensity = np.clip(rng.poisson(5.0, size=n_rows) + rng.normal(0, 0.9, n_rows), 1, None)
-
-    base_price = (
-        85
-        + 15 * nights
-        + 1.45 * lead_time
-        + 30 * np.maximum(region_score, -0.1)
-        + 24 * np.maximum(trip_score, 0.0)
-        + rng.lognormal(mean=3.15, sigma=0.35, size=n_rows)
+    model_size_b = np.select(
+        [device_tier == "entry", device_tier == "mid", device_tier == "premium"],
+        [rng.normal(2.1, 0.3, size=n_rows), rng.normal(6.9, 0.6, size=n_rows), rng.normal(12.4, 0.8, size=n_rows)],
     )
+    model_size_b = np.clip(model_size_b, 1.1, 15.0)
 
-    latent_intent = (
-        0.55 * loyalty_score
-        + 0.38 * device_score
-        + 0.26 * region_score
-        + 0.52 * trip_score
-        - 0.15 * sensitivity_score
-        + 0.0028 * base_price
-        - 0.002 * lead_time
-        + 0.04 * search_intensity
-        + rng.normal(0, 0.35, size=n_rows)
+    device_score = pd.Series(device_tier).map({"entry": -0.28, "mid": 0.0, "premium": 0.24}).to_numpy()
+    risk_score = pd.Series(prompt_risk).map({"low": -0.78, "medium": 0.0, "high": 1.02}).to_numpy()
+    domain_score = pd.Series(task_domain).map({"assistant": 0.05, "code": 0.16, "support": -0.04}).to_numpy()
+    conn_score = pd.Series(connectivity).map({"offline": -0.22, "poor": -0.08, "good": 0.08}).to_numpy()
+    region_score = pd.Series(region).map({"NA": 0.08, "EU": 0.05, "APAC": 0.0, "LATAM": -0.07}).to_numpy()
+
+    latent_risk_need = (
+        0.78 * risk_score
+        + 0.20 * (prompt_tokens > np.quantile(prompt_tokens, 0.72)).astype(float)
+        + 0.12 * (battery_pct < 32).astype(float)
+        + 0.10 * (connectivity != "good").astype(float)
+        - 0.08 * device_score
+        + rng.normal(0, 0.25, size=n_rows)
     )
 
     logits = np.zeros((n_rows, levels.size), dtype=float)
-    normalized_levels = levels / max(levels.max(), 1)
+    max_level = max(int(levels.max()), 1)
+    normalized_levels = levels / max_level
     for idx, level in enumerate(normalized_levels):
         logits[:, idx] = (
-            -0.45 * level * level
-            + 0.95 * level * latent_intent
-            + 0.55 * level * (sensitivity_score > 0).astype(float)
-            + 0.30 * level * (device == "mobile").astype(float)
-            + 0.20 * level * (base_price > np.quantile(base_price, 0.65)).astype(float)
-            + 0.17 * level * (lead_time < np.quantile(lead_time, 0.35)).astype(float)
+            -0.42 * np.square(level - 0.52)
+            + 1.15 * level * latent_risk_need
+            + 0.36 * level * (device_tier == "entry").astype(float)
+            + 0.25 * level * (task_domain == "support").astype(float)
+            + 0.22 * level * (battery_pct < 28).astype(float)
+            - 0.22 * level * (prompt_risk == "low").astype(float)
         )
 
     assignment_prob = _softmax(logits)
@@ -84,56 +85,86 @@ def generate_synthetic_data(
         [rng.choice(levels.size, p=assignment_prob[row_idx]) for row_idx in range(n_rows)],
         dtype=int,
     )
-    discount_pct = levels[sampled_idx]
+    policy_level = levels[sampled_idx]
 
-    # Ground-truth treatment effect: saturating lift with diminishing returns.
-    treatment_curve = (
-        1.12 * (1.0 - np.exp(-discount_pct / 7.0))
-        - 0.16 * np.square(discount_pct / 10.0)
-    )
-    heterogeneity = (
-        0.40 * sensitivity_score
-        + 0.15 * (device == "mobile").astype(float)
-        - 0.10 * (loyalty_tier == "G3").astype(float)
-        + 0.06 * (trip_type == "family").astype(float)
+    risk_weight = pd.Series(prompt_risk).map({"low": 0.24, "medium": 0.72, "high": 1.32}).to_numpy()
+    strictness = policy_level.astype(float)
+
+    safety_gain = 0.86 * (1.0 - np.exp(-strictness / 1.35)) * risk_weight
+    overblock_penalty = 0.48 * np.power(strictness / 4.0, 1.35) * np.clip(1.12 - risk_weight, 0.18, 1.2)
+
+    base_success_logit = (
+        -0.56
+        + 0.55 * device_score
+        + 0.18 * domain_score
+        + 0.09 * conn_score
+        + 0.06 * region_score
+        - 0.0007 * (prompt_tokens - 250)
+        + 0.007 * thermal_headroom
+        + 0.004 * (battery_pct - 50)
+        + rng.normal(0, 0.24, size=n_rows)
     )
 
-    base_logit = (
-        -1.65
-        + 0.82 * latent_intent
-        + 0.06 * np.log1p(search_intensity)
-        + 0.07 * (lead_time < 14).astype(float)
-        + 0.10 * (trip_type == "business").astype(float)
-        - 0.06 * (price_sensitivity == "low").astype(float)
-    )
-    book_prob = _sigmoid(base_logit + treatment_curve * (1 + heterogeneity))
-    book_prob = np.clip(book_prob, 0.01, 0.985)
+    success_prob = _sigmoid(base_success_logit + safety_gain - overblock_penalty)
+    success_prob = np.clip(success_prob, 0.03, 0.985)
+    task_success = rng.binomial(1, success_prob, size=n_rows)
 
-    booked = rng.binomial(1, book_prob, size=n_rows)
-
-    commission_rate = np.clip(
-        0.105
-        + 0.012 * (trip_type == "business").astype(float)
-        + 0.004 * (loyalty_tier == "G3").astype(float)
-        + rng.normal(0, 0.004, size=n_rows),
-        0.075,
-        0.16,
+    incident_logit = (
+        -2.45
+        + 1.55 * risk_weight
+        + 0.28 * (prompt_tokens > 450).astype(float)
+        + 0.18 * (connectivity == "offline").astype(float)
+        - 1.20 * safety_gain
+        + 0.16 * overblock_penalty
+        + rng.normal(0, 0.2, size=n_rows)
     )
-    net_value = booked * commission_rate * base_price * (1.0 - discount_pct / 100.0)
+    incident_prob = np.clip(_sigmoid(incident_logit), 0.003, 0.78)
+    safety_incident = rng.binomial(1, incident_prob, size=n_rows)
+
+    latency_ms = (
+        56.0
+        + 0.052 * prompt_tokens
+        + 15.5 * strictness
+        + 8.8 * (device_tier == "entry").astype(float)
+        - 7.2 * (device_tier == "premium").astype(float)
+        + 3.5 * (connectivity == "offline").astype(float)
+        + rng.normal(0, 3.9, size=n_rows)
+    )
+    latency_ms = np.clip(latency_ms, 32.0, 420.0)
+
+    power_mwh = (
+        21.0
+        + 0.034 * prompt_tokens
+        + 5.3 * strictness
+        + 4.6 * (device_tier == "entry").astype(float)
+        - 3.6 * (device_tier == "premium").astype(float)
+        + rng.normal(0, 2.2, size=n_rows)
+    )
+    power_mwh = np.clip(power_mwh, 7.0, 260.0)
+
+    safe_value = (
+        task_success * (1.48 - 0.0022 * latency_ms - 0.0031 * power_mwh)
+        - safety_incident * (1.34 + 0.21 * risk_weight)
+        + 0.06 * device_score
+        + rng.normal(0, 0.04, size=n_rows)
+    )
 
     return pd.DataFrame(
         {
-            "loyalty_tier": loyalty_tier,
-            "device": device,
+            "device_tier": device_tier,
+            "prompt_risk": prompt_risk,
+            "task_domain": task_domain,
             "region": region,
-            "price_sensitivity": price_sensitivity,
-            "trip_type": trip_type,
-            "lead_time": lead_time.round(2),
-            "base_price": base_price.round(2),
-            "nights": nights,
-            "search_intensity": search_intensity.round(2),
-            TREATMENT_COL: discount_pct.astype(int),
-            BOOKINGS_COL: booked.astype(int),
-            NET_VALUE_COL: net_value.round(5),
+            "connectivity": connectivity,
+            "prompt_tokens": prompt_tokens.round(2),
+            "battery_pct": battery_pct.round(2),
+            "thermal_headroom": thermal_headroom.round(2),
+            "model_size_b": model_size_b.round(3),
+            TREATMENT_COL: policy_level.astype(int),
+            SUCCESS_COL: task_success.astype(int),
+            SAFE_VALUE_COL: safe_value.round(6),
+            INCIDENT_COL: safety_incident.astype(int),
+            LATENCY_COL: latency_ms.round(4),
+            "power_mwh": power_mwh.round(4),
         }
     )

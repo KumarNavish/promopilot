@@ -1,3 +1,3 @@
-# PromoPilot Backend
+# EdgeAlign-DR Backend
 
-FastAPI API and offline ML training pipeline for counterfactual discount optimization.
+FastAPI inference API and offline ML pipeline for multi-level counterfactual optimization of on-device guardrail policy levels.

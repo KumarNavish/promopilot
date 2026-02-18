@@ -1,20 +1,21 @@
-# PromoPilot
+# EdgeAlign-DR
 
-PromoPilot is a production-oriented interactive demo for counterfactual discount optimization with multi-level treatments.
+EdgeAlign-DR is a production-style interactive demo for **multi-level counterfactual policy optimization** on on-device AI guardrails.
 
 ## What it demonstrates
 
-- Multi-level treatment policy optimization over discount levels `{0, 5, 10, 15, 20}`
-- Naive observed-outcome policy vs doubly robust (AIPW) counterfactual policy
-- Segment-level recommendations with dose-response visualization
+- Multi-level treatments over guardrail policy levels `{0,1,2,3,4}`
+- Naive logged-outcome policy vs doubly robust (AIPW) policy
+- Confounded synthetic logs where risky prompts are non-randomly assigned stricter policies
 - Fast API inference from precomputed artifacts
+- Minimal decision UI with one recommendation line, three KPI numbers, and one export action
 
 ## Monorepo layout
 
-- `backend/`: FastAPI app + synthetic data generator + training pipeline + tests
-- `frontend/`: Vite + React + TypeScript single-page demo + Playwright e2e
-- `Dockerfile` / `docker-compose.yml`: single-container deployment
-- `.github/workflows/pages.yml`: GitHub Pages deployment (static frontend mode)
+- `/Users/kumar0002/Documents/New project/promopilot/backend`: FastAPI app + synthetic data + training + tests
+- `/Users/kumar0002/Documents/New project/promopilot/frontend`: Vite + React + TypeScript UI + Playwright e2e
+- `/Users/kumar0002/Documents/New project/promopilot/Dockerfile`, `/Users/kumar0002/Documents/New project/promopilot/docker-compose.yml`: single-container deployment
+- `/Users/kumar0002/Documents/New project/promopilot/.github/workflows/pages.yml`: static GitHub Pages deployment
 
 ## Local development
 
@@ -24,6 +25,7 @@ PromoPilot is a production-oriented interactive demo for counterfactual discount
 cd /Users/kumar0002/Documents/New project/promopilot/backend
 python3 -m pip install -r requirements-dev.txt
 python3 -m app.ml.train
+python3 -m app.ml.export_static_recommendations
 python3 -m uvicorn app.main:app --reload --port 8000
 ```
 
@@ -35,17 +37,33 @@ npm install
 npm run dev
 ```
 
-Frontend dev server proxies `/api` to `http://localhost:8000`.
+Frontend proxies `/api` to `http://localhost:8000`.
 
-## GitHub Pages deployment
+## API
 
-This repo includes a static fallback bundle so the demo can run on GitHub Pages without a backend server.
+- `GET /healthz`
+- `GET /api/v1/metadata`
+- `POST /api/v1/recommend`
 
-- Static bundle generator: `python3 -m app.ml.export_static_recommendations`
-- Workflow: `.github/workflows/pages.yml`
-- Expected URL format: `https://<github-user>.github.io/<repo-name>/`
+Example request:
 
-Once pushed to the `main` branch, GitHub Actions will build and deploy the frontend to Pages.
+```json
+{
+  "objective": "task_success",
+  "max_policy_level": 3,
+  "segment_by": "prompt_risk",
+  "method": "dr"
+}
+```
+
+## Build and test
+
+```bash
+cd /Users/kumar0002/Documents/New project/promopilot
+make test
+```
+
+This runs backend unit tests, static bundle export, frontend build, and frontend e2e.
 
 ## Production-style container
 
@@ -54,33 +72,4 @@ cd /Users/kumar0002/Documents/New project/promopilot
 docker compose up --build
 ```
 
-App is served at [http://localhost:8080](http://localhost:8080).
-
-## Testing
-
-```bash
-cd /Users/kumar0002/Documents/New project/promopilot
-make test
-```
-
-This runs:
-- backend unit tests (`pytest`)
-- static recommendation bundle export for Pages
-- frontend e2e (`playwright`)
-
-## API summary
-
-- `GET /healthz`
-- `GET /api/v1/metadata`
-- `POST /api/v1/recommend`
-
-`POST /api/v1/recommend` request body:
-
-```json
-{
-  "objective": "bookings",
-  "max_discount_pct": 15,
-  "segment_by": "loyalty_tier",
-  "method": "dr"
-}
-```
+App serves at [http://localhost:8080](http://localhost:8080).

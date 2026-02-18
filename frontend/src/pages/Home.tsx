@@ -14,34 +14,21 @@ interface UiError {
 }
 
 interface MethodRollup {
-  bookings: number;
-  netValue: number;
-  avgDiscount: number;
+  successes: number;
+  safeValue: number;
+  incidents: number;
+  latency: number;
+  avgPolicyLevel: number;
 }
 
 interface SegmentMove {
   segment: string;
-  naiveDiscount: number;
-  drDiscount: number;
-  discountDelta: number;
-  netValueDelta: number;
+  naiveLevel: number;
+  drLevel: number;
+  delta: number;
 }
 
-interface LaunchBrief {
-  decisionTone: "ship" | "pilot";
-  decisionLine: string;
-  supportLine: string;
-  objectiveLift: number;
-  objectiveDigits: number;
-  discountDelta: number;
-  annualNetValueDelta: number;
-  rolloutSteps: string[];
-  guardrails: string[];
-}
-
-const DEFAULT_MAX_DISCOUNT = 15;
-const MONTHLY_USERS = 1_000_000;
-const USERS_BUCKET = 10_000;
+const DEFAULT_MAX_POLICY_LEVEL = 3;
 
 function exportPolicy(response: RecommendResponse | null): void {
   if (!response) {
@@ -51,7 +38,7 @@ function exportPolicy(response: RecommendResponse | null): void {
   const blob = new Blob([JSON.stringify(response, null, 2)], { type: "application/json" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = "promopilot-applied-policy.json";
+  link.download = "edgealign-policy.json";
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -62,109 +49,73 @@ function signed(value: number, digits = 1): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
 }
 
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0
-  }).format(value);
-}
-
 function rollupMethod(response: RecommendResponse): MethodRollup {
   const count = Math.max(response.segments.length, 1);
-  const bookings = response.segments.reduce((acc, segment) => acc + segment.expected_bookings_per_10k, 0) / count;
-  const netValue = response.segments.reduce((acc, segment) => acc + segment.expected_net_value_per_10k, 0) / count;
-  const avgDiscount = response.segments.reduce((acc, segment) => acc + segment.recommended_discount_pct, 0) / count;
-  return { bookings, netValue, avgDiscount };
+  const successes = response.segments.reduce((acc, segment) => acc + segment.expected_successes_per_10k, 0) / count;
+  const safeValue = response.segments.reduce((acc, segment) => acc + segment.expected_safe_value_per_10k, 0) / count;
+  const incidents = response.segments.reduce((acc, segment) => acc + segment.expected_incidents_per_10k, 0) / count;
+  const latency = response.segments.reduce((acc, segment) => acc + segment.expected_latency_ms, 0) / count;
+  const avgPolicyLevel = response.segments.reduce((acc, segment) => acc + segment.recommended_policy_level, 0) / count;
+
+  return {
+    successes,
+    safeValue,
+    incidents,
+    latency,
+    avgPolicyLevel
+  };
 }
 
-function computeTopMove(naive: RecommendResponse, dr: RecommendResponse): SegmentMove | null {
+function computeMoves(naive: RecommendResponse, dr: RecommendResponse): SegmentMove[] {
   const naiveMap = new Map(naive.segments.map((segment) => [segment.segment, segment]));
 
-  const moves = dr.segments
+  return dr.segments
     .map((segment): SegmentMove | null => {
       const before = naiveMap.get(segment.segment);
       if (!before) {
         return null;
       }
-
       return {
         segment: segment.segment,
-        naiveDiscount: before.recommended_discount_pct,
-        drDiscount: segment.recommended_discount_pct,
-        discountDelta: segment.recommended_discount_pct - before.recommended_discount_pct,
-        netValueDelta: segment.expected_net_value_per_10k - before.expected_net_value_per_10k
+        naiveLevel: before.recommended_policy_level,
+        drLevel: segment.recommended_policy_level,
+        delta: segment.recommended_policy_level - before.recommended_policy_level
       };
     })
-    .filter((move): move is SegmentMove => Boolean(move))
-    .sort((a, b) => Math.abs(b.discountDelta) - Math.abs(a.discountDelta));
-
-  return moves[0] ?? null;
+    .filter((move): move is SegmentMove => move !== null && move.delta !== 0)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 }
 
-function buildBrief(
-  objective: Objective,
-  segmentBy: SegmentBy,
-  maxDiscountPct: number,
-  objectiveLift: number,
-  objectiveDigits: number,
-  discountDelta: number,
-  annualNetValueDelta: number
-): LaunchBrief {
-  const scopeLabel = segmentBy === "none" ? "all users" : segmentBy.replace("_", " ");
-  const objectiveLabel = objective === "bookings" ? "bookings" : "net value";
-
-  if (objectiveLift >= 0 && discountDelta <= 0) {
-    return {
-      decisionTone: "ship",
-      decisionLine: `Ship optimized discount policy for ${scopeLabel}.`,
-      supportLine: `Expected lift: ${signed(objectiveLift, objectiveDigits)} ${objectiveLabel} per 10k while reducing average discount by ${Math.abs(
-        discountDelta
-      ).toFixed(1)} pp. Annual net value impact: ${formatCurrency(annualNetValueDelta)}.`,
-      objectiveLift,
-      objectiveDigits,
-      discountDelta,
-      annualNetValueDelta,
-      rolloutSteps: [
-        "Week 1: 10% traffic exposure with daily monitoring.",
-        "Week 2: 50% exposure if guardrails hold.",
-        "Week 3: 100% rollout and lock policy."
-      ],
-      guardrails: [
-        "Pause if net value drops below -$500 per 10k for 2 consecutive days.",
-        "Pause if booking lift turns negative for 2 consecutive days.",
-        "Rollback if average discount exceeds planned cap by more than 1 pp."
-      ]
-    };
+function buildRecommendationLine(segmentBy: SegmentBy, naive: RecommendResponse, dr: RecommendResponse): string {
+  const moves = computeMoves(naive, dr);
+  if (moves.length === 0) {
+    const global = dr.segments[0];
+    if (!global) {
+      return "No policy change detected.";
+    }
+    return `Keep guardrail level ${global.recommended_policy_level}; bias adjustment confirms the current policy.`;
   }
 
-  return {
-    decisionTone: "pilot",
-    decisionLine: `Run controlled pilot for ${scopeLabel}.`,
-    supportLine: `Expected impact: ${signed(objectiveLift, objectiveDigits)} ${objectiveLabel} per 10k and annual net value impact ${formatCurrency(
-      annualNetValueDelta
-    )}. Validate with guardrails before full rollout.`,
-    objectiveLift,
-    objectiveDigits,
-    discountDelta,
-    annualNetValueDelta,
-    rolloutSteps: [
-      "Week 1-2: 10% traffic pilot.",
-      "Week 3: expand to 30% only if metrics stay non-negative.",
-      "Week 4: decide full rollout or rollback."
-    ],
-    guardrails: [
-      "Stop pilot if objective KPI drops for 3 days in a row.",
-      "Stop pilot if net value delta becomes negative beyond tolerance.",
-      `Never exceed max discount cap of ${maxDiscountPct}%.`
-    ]
-  };
+  const down = moves.filter((move) => move.delta < 0).length;
+  const up = moves.filter((move) => move.delta > 0).length;
+  const top = moves
+    .slice(0, 2)
+    .map((move) => `${move.segment}: L${move.naiveLevel} -> L${move.drLevel}`)
+    .join(" | ");
+
+  if (segmentBy === "none") {
+    const naiveGlobal = naive.segments[0]?.recommended_policy_level;
+    const drGlobal = dr.segments[0]?.recommended_policy_level;
+    return `Switch global guardrail from L${naiveGlobal} to L${drGlobal} after bias adjustment.`;
+  }
+
+  return `Bias-adjusted policy rebalances guardrails (${down} segment${down === 1 ? "" : "s"} down, ${up} up). ${top}`;
 }
 
 export function Home(): JSX.Element {
-  const [objective, setObjective] = useState<Objective>("bookings");
-  const [maxDiscountPct, setMaxDiscountPct] = useState<number>(DEFAULT_MAX_DISCOUNT);
-  const [segmentBy, setSegmentBy] = useState<SegmentBy>("none");
+  const [objective, setObjective] = useState<Objective>("task_success");
+  const [maxPolicyLevel, setMaxPolicyLevel] = useState<number>(DEFAULT_MAX_POLICY_LEVEL);
+  const [segmentBy, setSegmentBy] = useState<SegmentBy>("prompt_risk");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<{ naive?: RecommendResponse; dr?: RecommendResponse }>({});
   const [error, setError] = useState<UiError | null>(null);
@@ -179,43 +130,25 @@ export function Home(): JSX.Element {
 
     const naive = rollupMethod(results.naive);
     const dr = rollupMethod(results.dr);
-    const objectiveLift = objective === "bookings" ? dr.bookings - naive.bookings : dr.netValue - naive.netValue;
-    const objectiveDigits = objective === "bookings" ? 1 : 0;
-    const discountDelta = dr.avgDiscount - naive.avgDiscount;
-    const annualNetValueDelta = ((dr.netValue - naive.netValue) * MONTHLY_USERS * 12) / USERS_BUCKET;
+
+    const objectiveLift = objective === "task_success" ? dr.successes - naive.successes : dr.safeValue - naive.safeValue;
+    const objectiveLabel = objective === "task_success" ? "Task success lift" : "Safe-value lift";
 
     return {
       objectiveLift,
-      objectiveDigits,
-      discountDelta,
-      annualNetValueDelta,
-      currentAvgDiscount: naive.avgDiscount,
-      optimizedAvgDiscount: dr.avgDiscount
+      objectiveLabel,
+      incidentsAvoided: naive.incidents - dr.incidents,
+      latencyDelta: dr.latency - naive.latency,
+      avgPolicyDelta: dr.avgPolicyLevel - naive.avgPolicyLevel
     };
   }, [objective, results.dr, results.naive]);
 
-  const topMove = useMemo(() => {
+  const recommendationLine = useMemo(() => {
     if (!results.naive || !results.dr) {
       return null;
     }
-    return computeTopMove(results.naive, results.dr);
-  }, [results.dr, results.naive]);
-
-  const brief = useMemo(() => {
-    if (!score) {
-      return null;
-    }
-
-    return buildBrief(
-      objective,
-      segmentBy,
-      maxDiscountPct,
-      score.objectiveLift,
-      score.objectiveDigits,
-      score.discountDelta,
-      score.annualNetValueDelta
-    );
-  }, [maxDiscountPct, objective, score, segmentBy]);
+    return buildRecommendationLine(segmentBy, results.naive, results.dr);
+  }, [segmentBy, results.dr, results.naive]);
 
   const handleGenerate = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -225,13 +158,13 @@ export function Home(): JSX.Element {
       const [naive, dr] = await Promise.all([
         recommendPolicy({
           objective,
-          max_discount_pct: maxDiscountPct,
+          max_policy_level: maxPolicyLevel,
           segment_by: segmentBy,
           method: "naive"
         }),
         recommendPolicy({
           objective,
-          max_discount_pct: maxDiscountPct,
+          max_policy_level: maxPolicyLevel,
           segment_by: segmentBy,
           method: "dr"
         })
@@ -241,45 +174,45 @@ export function Home(): JSX.Element {
     } catch (err) {
       if (err instanceof ApiError) {
         setError({
-          message: "Could not compute recommendation. Try again.",
+          message: "Could not compute policy. Try again.",
           requestId: err.requestId
         });
       } else {
-        setError({ message: "Could not compute recommendation. Try again." });
+        setError({ message: "Could not compute policy. Try again." });
       }
     } finally {
       setLoading(false);
     }
-  }, [maxDiscountPct, objective, segmentBy]);
+  }, [maxPolicyLevel, objective, segmentBy]);
 
   return (
     <main className="page-shell">
-      <header className="hero panel minimal-hero">
-        <p className="eyebrow">PromoPilot</p>
-        <h1>Discount Strategy Launch Brief</h1>
-        <p className="hero-copy">Set assumptions, run analysis, then apply the recommended policy.</p>
+      <header className="panel hero" data-testid="hero">
+        <p className="eyebrow">EdgeAlign-DR</p>
+        <h1>On-device guardrail policy optimizer</h1>
+        <p className="hero-copy">
+          Problem: historical logs assign stricter guardrails to risky prompts. The bias-adjusted policy learns what should
+          actually run in production.
+        </p>
       </header>
 
-      <section className="panel assumptions-panel" data-testid="assumptions-panel">
-        <p className="assumptions-title">Step 1: set assumptions</p>
-        <div className="assumptions-body">
-          <Controls
-            objective={objective}
-            maxDiscountPct={maxDiscountPct}
-            segmentBy={segmentBy}
-            onObjectiveChange={setObjective}
-            onMaxDiscountChange={setMaxDiscountPct}
-            onSegmentByChange={setSegmentBy}
-            onGenerate={handleGenerate}
-            loading={loading}
-            hasResults={hasResults}
-          />
-        </div>
+      <section className="panel controls-wrap" data-testid="assumptions-panel">
+        <Controls
+          objective={objective}
+          maxPolicyLevel={maxPolicyLevel}
+          segmentBy={segmentBy}
+          onObjectiveChange={setObjective}
+          onMaxPolicyLevelChange={setMaxPolicyLevel}
+          onSegmentByChange={setSegmentBy}
+          onGenerate={handleGenerate}
+          loading={loading}
+          hasResults={hasResults}
+        />
       </section>
 
       {loading ? (
         <p className="loading-line" data-testid="loading-line">
-          Step 2: comparing current policy vs optimized policy...
+          Computing naive vs bias-adjusted policy...
         </p>
       ) : null}
 
@@ -290,86 +223,46 @@ export function Home(): JSX.Element {
         </p>
       ) : null}
 
-      {hasResults && score && brief ? (
-        <section className="results-stack" data-testid="results-block">
-          <section className="panel compact-result" data-testid="recommendation-panel">
-            <p className={`decision-pill ${brief.decisionTone}`} data-testid="decision-pill">
-              {brief.decisionTone === "ship" ? "Decision: Ship" : "Decision: Pilot"}
-            </p>
-            <p className="recommendation-line" data-testid="recommendation-line">
-              {brief.decisionLine}
-            </p>
-            <p className="recommendation-context" data-testid="recommendation-context">
-              {brief.supportLine}
-            </p>
-            <p className="recommendation-context" data-testid="baseline-context">
-              Compared against current observed policy (avg discount {score.currentAvgDiscount.toFixed(1)}%) vs optimized
-              policy (avg {score.optimizedAvgDiscount.toFixed(1)}%).
-            </p>
+      {hasResults && score && recommendationLine ? (
+        <section className="panel result-panel" data-testid="results-block">
+          <p className="recommendation-line" data-testid="recommendation-line">
+            {recommendationLine}
+          </p>
 
-            <div className="compact-kpis">
-              <article>
-                <p>Primary KPI lift (per 10k)</p>
-                <strong data-testid="kpi-objective">{signed(score.objectiveLift, score.objectiveDigits)}</strong>
-              </article>
-              <article>
-                <p>Average discount change</p>
-                <strong data-testid="kpi-discount">{signed(score.discountDelta)} pp</strong>
-              </article>
-              <article>
-                <p>Annual net value impact</p>
-                <strong data-testid="kpi-net-value">{formatCurrency(score.annualNetValueDelta)}</strong>
-              </article>
-            </div>
+          <div className="kpi-row">
+            <article className="kpi-card" data-testid="kpi-objective">
+              <p>{score.objectiveLabel} (per 10k)</p>
+              <strong>{signed(score.objectiveLift, 1)}</strong>
+            </article>
 
-            <button
-              type="button"
-              className="button-primary"
-              onClick={() => exportPolicy(appliedPolicy)}
-              data-testid="apply-policy"
-              disabled={!appliedPolicy}
-            >
-              Apply policy
-            </button>
-          </section>
+            <article className="kpi-card" data-testid="kpi-incident">
+              <p>Incidents avoided (per 10k)</p>
+              <strong>{signed(score.incidentsAvoided, 1)}</strong>
+            </article>
 
-          <section className="panel move-panel" data-testid="moves-panel">
-            <h3>Most important policy move</h3>
-            <ul className="simple-list">
-              {topMove ? (
-                <li>
-                  {topMove.segment}: discount changes from {topMove.naiveDiscount}% to {topMove.drDiscount}% ({signed(
-                    topMove.discountDelta
-                  )} pp), expected net value shift {signed(topMove.netValueDelta, 0)} per 10k.
-                </li>
-              ) : (
-                <li>No segment-level change under these assumptions.</li>
-              )}
-            </ul>
-          </section>
+            <article className="kpi-card" data-testid="kpi-latency">
+              <p>Latency change (ms)</p>
+              <strong>{signed(score.latencyDelta, 1)}</strong>
+            </article>
+          </div>
 
-          <section className="panel move-panel" data-testid="rollout-plan">
-            <h3>Step 3: rollout plan</h3>
-            <ul className="simple-list">
-              {brief.rolloutSteps.map((step) => (
-                <li key={step}>{step}</li>
-              ))}
-            </ul>
-          </section>
+          <p className="result-footnote" data-testid="result-footnote">
+            Average policy level shift vs naive: {signed(score.avgPolicyDelta, 2)}.
+          </p>
 
-          <section className="panel move-panel" data-testid="guardrails">
-            <h3>Guardrails</h3>
-            <ul className="simple-list">
-              {brief.guardrails.map((rule) => (
-                <li key={rule}>{rule}</li>
-              ))}
-            </ul>
-          </section>
+          <button
+            type="button"
+            className="button-primary"
+            onClick={() => exportPolicy(appliedPolicy)}
+            data-testid="apply-policy"
+            disabled={!appliedPolicy}
+          >
+            Apply policy (export JSON)
+          </button>
         </section>
       ) : (
         <section className="panel empty-state">
-          <p className="narrative-title">Ready to evaluate</p>
-          <p>Run the analysis to generate a launch brief.</p>
+          <p>Run once to generate the production policy recommendation.</p>
         </section>
       )}
     </main>

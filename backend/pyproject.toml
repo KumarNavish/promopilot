@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "promopilot-backend"
+name = "edgealign-dr-backend"
 version = "0.1.0"
-description = "PromoPilot counterfactual discount optimizer backend"
+description = "EdgeAlign-DR counterfactual on-device policy optimizer backend"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [

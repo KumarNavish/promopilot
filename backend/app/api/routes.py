@@ -34,7 +34,7 @@ def metadata() -> MetadataResponse:
     return MetadataResponse(
         artifact_version=str(artifacts.manifest.get("artifact_version", "unknown")),
         objectives=list(settings.objectives),
-        discount_levels=list(settings.treatment_levels),
+        policy_levels=list(settings.treatment_levels),
         segmentations=list(settings.segmentations),
         has_dr=artifacts.has_dr,
     )
@@ -55,7 +55,7 @@ def recommend(payload: RecommendRequest, request: Request) -> RecommendResponse:
     cache_key = json.dumps(
         {
             "objective": payload.objective,
-            "max_discount_pct": payload.max_discount_pct,
+            "max_policy_level": payload.max_policy_level,
             "segment_by": payload.segment_by,
             "method": method_used,
             "artifact_hash": artifacts.manifest.get("artifact_hash", "unknown"),
@@ -69,19 +69,18 @@ def recommend(payload: RecommendRequest, request: Request) -> RecommendResponse:
             recommendation = recommend_policy(
                 dose_response=artifacts.dose_response,
                 objective=payload.objective,
-                max_discount_pct=payload.max_discount_pct,
+                max_policy_level=payload.max_policy_level,
                 segment_by=payload.segment_by,
                 method=method_used,
             )
         except ValueError as exc:
             if requested_method == "dr":
-                # If DR slice is missing in artifacts, fail safely to naive.
                 method_used = "naive"
                 warnings.append("DR policy unavailable for this slice; returning naive policy")
                 recommendation = recommend_policy(
                     dose_response=artifacts.dose_response,
                     objective=payload.objective,
-                    max_discount_pct=payload.max_discount_pct,
+                    max_policy_level=payload.max_policy_level,
                     segment_by=payload.segment_by,
                     method=method_used,
                 )

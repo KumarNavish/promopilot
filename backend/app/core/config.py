@@ -24,7 +24,7 @@ def get_settings() -> Settings:
     return Settings(
         app_env=os.getenv("APP_ENV", "dev"),
         artifact_dir=artifact_dir,
-        treatment_levels=(0, 5, 10, 15, 20),
-        objectives=("bookings", "net_value"),
-        segmentations=("none", "loyalty_tier", "price_sensitivity", "device"),
+        treatment_levels=(0, 1, 2, 3, 4),
+        objectives=("task_success", "safe_value"),
+        segmentations=("none", "device_tier", "prompt_risk", "task_domain"),
     )

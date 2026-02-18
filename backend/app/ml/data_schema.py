@@ -5,39 +5,41 @@ from typing import Dict, List
 
 import pandas as pd
 
-TREATMENT_COL = "discount_pct"
-BOOKINGS_COL = "booked"
-NET_VALUE_COL = "net_value"
+TREATMENT_COL = "policy_level"
+SUCCESS_COL = "task_success"
+SAFE_VALUE_COL = "safe_value"
+INCIDENT_COL = "safety_incident"
+LATENCY_COL = "latency_ms"
 
 CATEGORICAL_FEATURES: List[str] = [
-    "loyalty_tier",
-    "device",
+    "device_tier",
+    "prompt_risk",
+    "task_domain",
     "region",
-    "price_sensitivity",
-    "trip_type",
+    "connectivity",
 ]
 
 NUMERIC_FEATURES: List[str] = [
-    "lead_time",
-    "base_price",
-    "nights",
-    "search_intensity",
+    "prompt_tokens",
+    "battery_pct",
+    "thermal_headroom",
+    "model_size_b",
 ]
 
 FEATURE_COLUMNS: List[str] = CATEGORICAL_FEATURES + NUMERIC_FEATURES
 
 SEGMENT_COLUMNS: Dict[str, str] = {
     "none": "__all__",
-    "loyalty_tier": "loyalty_tier",
-    "price_sensitivity": "price_sensitivity",
-    "device": "device",
+    "device_tier": "device_tier",
+    "prompt_risk": "prompt_risk",
+    "task_domain": "task_domain",
 }
 
 SEGMENT_LABEL_PREFIX: Dict[str, str] = {
     "none": "All",
-    "loyalty_tier": "Loyalty",
-    "price_sensitivity": "Sensitivity",
-    "device": "Device",
+    "device_tier": "Device",
+    "prompt_risk": "Risk",
+    "task_domain": "Domain",
 }
 
 
@@ -46,7 +48,9 @@ class DataSchema:
     treatment_levels: List[int]
 
 
-REQUIRED_COLUMNS = set(FEATURE_COLUMNS + [TREATMENT_COL, BOOKINGS_COL, NET_VALUE_COL])
+REQUIRED_COLUMNS = set(
+    FEATURE_COLUMNS + [TREATMENT_COL, SUCCESS_COL, SAFE_VALUE_COL, INCIDENT_COL, LATENCY_COL]
+)
 
 
 def validate_dataframe(df: pd.DataFrame, schema: DataSchema) -> None:
@@ -70,6 +74,6 @@ def validate_dataframe(df: pd.DataFrame, schema: DataSchema) -> None:
 
 def make_segment_label(segment_by: str, segment_value: str) -> str:
     if segment_by == "none":
-        return "All users"
+        return "All traffic"
     prefix = SEGMENT_LABEL_PREFIX.get(segment_by, segment_by)
     return f"{prefix}={segment_value}"
