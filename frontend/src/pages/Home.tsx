@@ -204,6 +204,8 @@ export function Home(): JSX.Element {
     };
   }, [segmentShifts]);
 
+  const topMoves = useMemo(() => segmentShifts.slice(0, 4), [segmentShifts]);
+
   const wowHeadline = useMemo(() => {
     if (!scorecard) {
       return "";
@@ -221,6 +223,32 @@ export function Home(): JSX.Element {
 
     return `Bias-adjusted shifts outcome by ${signed(objectiveDelta, objective === "bookings" ? 1 : 0)} ${objectiveLabel} vs naive.`;
   }, [objective, scorecard]);
+
+  const executiveDecision = useMemo(() => {
+    if (!scorecard || !scaledImpact) {
+      return null;
+    }
+
+    const objectiveDelta = objective === "bookings" ? scorecard.bookingsDelta : scorecard.netValueDelta;
+    const objectiveLabel = objective === "bookings" ? "bookings" : "net value";
+    const objectiveDigits = objective === "bookings" ? 1 : 0;
+    const objectiveImproved = objectiveDelta >= 0;
+    const discountReduced = scorecard.discountDelta <= 0;
+    const dominates = objectiveImproved && discountReduced;
+    const relativeDiscountCut =
+      scorecard.naive.avgDiscount > 0 ? ((scorecard.naive.avgDiscount - scorecard.dr.avgDiscount) / scorecard.naive.avgDiscount) * 100 : 0;
+
+    return {
+      dominates,
+      objectiveLabel,
+      objectiveDelta,
+      objectiveDigits,
+      objectiveImproved,
+      discountReduced,
+      relativeDiscountCut,
+      annualNetValueDelta: scaledImpact.annualNetValueDelta
+    };
+  }, [objective, scaledImpact, scorecard]);
 
   const handleGenerate = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -314,76 +342,69 @@ export function Home(): JSX.Element {
 
       {hasResults ? (
         <section className="results-stack" data-testid="results-block">
-          {scorecard && scaledImpact ? (
-            <section className="panel recommendation-panel" data-testid="recommendation-panel">
+          {scorecard && scaledImpact && executiveDecision ? (
+            <section className="panel recommendation-panel launch-panel" data-testid="recommendation-panel">
               <p className="eyebrow">Recommended Action</p>
               <h2>
-                Ship bias-adjusted policy for <strong>{segmentBy === "none" ? "all users" : segmentBy}</strong> with max{" "}
-                <strong>{maxDiscountPct}%</strong> discount.
+                {executiveDecision.dominates ? "Ship bias-adjusted policy now." : "Bias-adjusted policy is preferred."}
               </h2>
               <p className="recommendation-copy">
-                This replaces naive conversion-led discounting with a policy that corrects targeting bias before allocating
-                promo spend.
+                Scenario: <strong>{segmentBy === "none" ? "all users" : segmentBy}</strong>, max discount{" "}
+                <strong>{maxDiscountPct}%</strong>. Result: {signed(executiveDecision.objectiveDelta, executiveDecision.objectiveDigits)}{" "}
+                {executiveDecision.objectiveLabel} with {signed(scorecard.discountDelta)} pp average discount shift (DR - Naive).
               </p>
-              {rolloutStats ? (
-                <p className="recommendation-copy">
-                  Policy changes in <strong>{rolloutStats.changedSegments}</strong> of{" "}
-                  <strong>{rolloutStats.totalSegments}</strong> segments: {rolloutStats.discountDownSegments} discount cuts,{" "}
-                  {rolloutStats.discountUpSegments} increases.
+              {executiveDecision.dominates ? (
+                <p className="recommendation-copy recommendation-proof">
+                  Naive policy is dominated in this scenario: higher promo intensity with worse business outcome.
                 </p>
               ) : null}
               <div className="recommendation-metrics">
                 <article>
-                  <p>Monthly bookings impact (at 1M users)</p>
-                  <strong>{signed(scaledImpact.monthlyBookingsDelta)}</strong>
+                  <p>Objective shift</p>
+                  <strong>{signed(executiveDecision.objectiveDelta, executiveDecision.objectiveDigits)}</strong>
                 </article>
                 <article>
-                  <p>Monthly net value impact (at 1M users)</p>
-                  <strong>{formatCurrency(scaledImpact.monthlyNetValueDelta)}</strong>
+                  <p>Annual net value impact (1M users/month)</p>
+                  <strong>{formatCurrency(executiveDecision.annualNetValueDelta)}</strong>
                 </article>
                 <article>
-                  <p>Annual net value impact (at 1M users/month)</p>
-                  <strong>{formatCurrency(scaledImpact.annualNetValueDelta)}</strong>
+                  <p>Relative discount change vs naive</p>
+                  <strong>{signed(-executiveDecision.relativeDiscountCut)}%</strong>
                 </article>
                 <article>
                   <p>Average discount shift (DR - Naive)</p>
                   <strong>{signed(scorecard.discountDelta)} pp</strong>
                 </article>
               </div>
+              {rolloutStats && topMoves.length > 0 ? (
+                <p className="recommendation-copy">
+                  Policy updates in {rolloutStats.changedSegments}/{rolloutStats.totalSegments} segments ({rolloutStats.discountDownSegments} cuts,{" "}
+                  {rolloutStats.discountUpSegments} increases). Biggest move: <strong>{topMoves[0].segment}</strong> ({signed(
+                    topMoves[0].discountDelta
+                  )} pp).
+                </p>
+              ) : null}
             </section>
           ) : null}
 
-          {segmentShifts.length > 0 ? (
+          {topMoves.length > 0 ? (
             <section className="panel shift-panel" data-testid="shift-panel">
               <div className="shift-head">
-                <h3>What changes in the policy</h3>
-                <p>This is where naive over-discounting is corrected at segment level.</p>
+                <h3>Top policy moves</h3>
+                <p>Where discounts are actively reallocated.</p>
               </div>
-              <div className="shift-table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Segment</th>
-                      <th>Naive discount</th>
-                      <th>Bias-adjusted discount</th>
-                      <th>Discount shift</th>
-                      <th>Bookings shift</th>
-                      <th>Net value shift</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {segmentShifts.map((shift) => (
-                      <tr key={`shift-${shift.segment}`}>
-                        <td>{shift.segment}</td>
-                        <td>{shift.naiveDiscount}%</td>
-                        <td>{shift.drDiscount}%</td>
-                        <td>{signed(shift.discountDelta)} pp</td>
-                        <td>{signed(shift.bookingsDelta)}</td>
-                        <td>{signed(shift.netValueDelta, 0)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="moves-grid">
+                {topMoves.map((shift) => (
+                  <article key={`shift-${shift.segment}`} className="move-card">
+                    <p className="move-segment">{shift.segment}</p>
+                    <p className="move-main">
+                      {shift.naiveDiscount}% to {shift.drDiscount}% ({signed(shift.discountDelta)} pp)
+                    </p>
+                    <p className="move-meta">
+                      Bookings {signed(shift.bookingsDelta)} | Net value {signed(shift.netValueDelta, 0)}
+                    </p>
+                  </article>
+                ))}
               </div>
             </section>
           ) : null}

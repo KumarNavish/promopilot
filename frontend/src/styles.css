@@ -177,6 +177,10 @@ h1 {
     linear-gradient(180deg, #f6fffd, #eefaf7 72%, #f4faf8);
 }
 
+.launch-panel {
+  border: 1px solid rgba(0, 104, 112, 0.28);
+}
+
 .recommendation-panel h2 {
   margin: 5px 0 0;
   font-family: "Space Grotesk", sans-serif;
@@ -193,6 +197,15 @@ h1 {
   color: #31565e;
   font-size: 0.92rem;
   line-height: 1.42;
+}
+
+.recommendation-proof {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: #e7f7f2;
+  color: #0f4d45;
+  font-weight: 600;
 }
 
 .recommendation-metrics {
@@ -544,6 +557,38 @@ th {
   overflow-x: auto;
 }
 
+.moves-grid {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.move-card {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 11px;
+  padding: 10px;
+  background: #fff;
+}
+
+.move-segment {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #4c5f66;
+}
+
+.move-main {
+  margin: 6px 0 0;
+  font-weight: 700;
+  color: #0d3c45;
+}
+
+.move-meta {
+  margin: 5px 0 0;
+  font-size: 0.82rem;
+  color: #577178;
+}
+
 .loading-line {
   margin: 12px 0 0;
   color: #305057;
@@ -576,6 +621,7 @@ th {
   .controls-grid,
   .cards-grid,
   .recommendation-metrics,
+  .moves-grid,
   .wow-metrics,
   .method-summary-grid,
   .before-after-columns {
