@@ -22,6 +22,9 @@ interface QueueTimeline {
   minutes: number[];
   naiveQueue: number[];
   aiQueue: number[];
+  sloThreshold: number;
+  naiveBreachMinute: number | null;
+  aiBreachMinute: number | null;
 }
 
 type PolicyMap = Record<string, number>;
@@ -45,10 +48,12 @@ interface HorizonConfig {
 interface ImpactScore {
   recommendationLine: string;
   usefulnessLine: string;
+  operationsLine: string;
   policyDiffLine: string;
   successLift: number;
   incidentsAvoided: number;
   riskCostImpactUsd: number;
+  onCallPagesAvoided: number;
   aiPolicy: PolicyMap;
   naivePolicy: PolicyMap;
   aiProjection: PolicyProjection;
@@ -59,6 +64,7 @@ const DEMO_SEGMENT_BY: SegmentBy = "task_domain";
 const DEFAULT_WEEKLY_REQUESTS = 5_000_000;
 const DEFAULT_INCIDENT_COST_USD = 2500;
 const HOURS_PER_INCIDENT = 2.2;
+const INCIDENTS_PER_ONCALL_PAGE = 14;
 const TIMELINE_TOTAL_MINUTES = 12;
 const TIMELINE_TICK_MS = 420;
 
@@ -212,6 +218,7 @@ function buildQueueTimeline(params: { naiveIncidents: number; aiIncidents: numbe
   let aiQueue = Math.max(6, naiveQueue - 4 * gapRatio);
   const naiveSlope = 1.4 + volumeScale * 0.4;
   const aiSlope = naiveSlope - 2.4 - gapRatio * 5;
+  const sloThreshold = Math.round(clamp(30 + volumeScale * 2.6, 28, 48));
 
   const naiveQueueSeries: number[] = [];
   const aiQueueSeries: number[] = [];
@@ -223,10 +230,16 @@ function buildQueueTimeline(params: { naiveIncidents: number; aiIncidents: numbe
     aiQueueSeries.push(aiQueue);
   }
 
+  const naiveBreachIndex = naiveQueueSeries.findIndex((value) => value >= sloThreshold);
+  const aiBreachIndex = aiQueueSeries.findIndex((value) => value >= sloThreshold);
+
   return {
     minutes,
     naiveQueue: naiveQueueSeries,
-    aiQueue: aiQueueSeries
+    aiQueue: aiQueueSeries,
+    sloThreshold,
+    naiveBreachMinute: naiveBreachIndex >= 0 ? naiveBreachIndex : null,
+    aiBreachMinute: aiBreachIndex >= 0 ? aiBreachIndex : null
   };
 }
 
@@ -300,10 +313,12 @@ function exportPolicyBundle(params: {
     },
     recommendation: score.recommendationLine,
     operational_usefulness: score.usefulnessLine,
+    operational_oncall: score.operationsLine,
     impact_vs_naive: {
       successful_outcomes: Math.round(score.successLift),
       incidents_avoided: Math.round(score.incidentsAvoided),
-      risk_cost_impact_usd: Math.round(score.riskCostImpactUsd)
+      risk_cost_impact_usd: Math.round(score.riskCostImpactUsd),
+      oncall_pages_avoided: Math.round(score.onCallPagesAvoided)
     },
     recommended_rules: policyToRules(score.aiPolicy),
     naive_reference_rules: policyToRules(score.naivePolicy)
@@ -329,6 +344,7 @@ export function Home(): JSX.Element {
   const [error, setError] = useState<UiError | null>(null);
   const [replayTick, setReplayTick] = useState(0);
   const [timelineMinute, setTimelineMinute] = useState(0);
+  const [timelinePlaying, setTimelinePlaying] = useState(true);
 
   const modeConfig = MODE_CONFIGS[mode];
   const horizonConfig = HORIZON_CONFIGS[horizon];
@@ -407,6 +423,7 @@ export function Home(): JSX.Element {
     const successLift = aiProjection.successes - naiveProjection.successes;
     const incidentsAvoided = naiveProjection.incidents - aiProjection.incidents;
     const riskCostImpactUsd = naiveProjection.riskCostUsd - aiProjection.riskCostUsd;
+    const onCallPagesAvoided = incidentsAvoided / INCIDENTS_PER_ONCALL_PAGE;
 
     const policyPhrase = buildPolicyPhrase(aiPolicy);
     const incidentPhrase =
@@ -419,16 +436,22 @@ export function Home(): JSX.Element {
       reclaimedHours >= 0
         ? `${formatInteger(reclaimedHours)} engineer-hours reclaimed`
         : `${formatInteger(Math.abs(reclaimedHours))} extra engineer-hours consumed`;
+    const pagesPhrase =
+      onCallPagesAvoided >= 0
+        ? `${formatInteger(onCallPagesAvoided)} on-call pages avoided`
+        : `${formatInteger(Math.abs(onCallPagesAvoided))} additional on-call pages`;
 
     return {
       recommendationLine: `Ship now: ${policyPhrase}. In ${horizonConfig.label}, this bias-adjusted policy projects ${formatSignedInteger(
         successLift
       )} successful outcomes with ${incidentPhrase} vs naive targeting.`,
       usefulnessLine: `Practical impact: ${formatSignedCurrency(riskCostImpactUsd)} incident-cost change and ${hoursPhrase}.`,
+      operationsLine: `Operations impact: ${pagesPhrase} (assumes ${INCIDENTS_PER_ONCALL_PAGE} incidents per page).`,
       policyDiffLine: buildPolicyDiffLine(naivePolicy, aiPolicy),
       successLift,
       incidentsAvoided,
       riskCostImpactUsd,
+      onCallPagesAvoided,
       aiPolicy,
       naivePolicy,
       aiProjection,
@@ -451,14 +474,24 @@ export function Home(): JSX.Element {
   useEffect(() => {
     if (!queueTimeline) {
       setTimelineMinute(0);
+      setTimelinePlaying(false);
       return;
     }
 
     setTimelineMinute(0);
+    setTimelinePlaying(true);
+  }, [animationKey, queueTimeline]);
+
+  useEffect(() => {
+    if (!queueTimeline || !timelinePlaying) {
+      return;
+    }
+
     const intervalId = window.setInterval(() => {
       setTimelineMinute((current) => {
         if (current >= TIMELINE_TOTAL_MINUTES) {
           window.clearInterval(intervalId);
+          setTimelinePlaying(false);
           return current;
         }
         return current + 1;
@@ -468,7 +501,7 @@ export function Home(): JSX.Element {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [animationKey, queueTimeline]);
+  }, [queueTimeline, timelinePlaying]);
 
   const animatedSuccessLift = useAnimatedNumber(score?.successLift ?? 0, animationKey);
   const animatedIncidentsAvoided = useAnimatedNumber(score?.incidentsAvoided ?? 0, animationKey);
@@ -482,6 +515,22 @@ export function Home(): JSX.Element {
     currentNaiveQueue >= currentAiQueue
       ? `Minute ${timelineMinute}: bias-adjusted queue is ${formatInteger(currentNaiveQueue - currentAiQueue)} incidents lower.`
       : `Minute ${timelineMinute}: queue pressure is ${formatInteger(currentAiQueue - currentNaiveQueue)} incidents higher; investigate operating mode.`;
+  const timelineVerdict = queueTimeline
+    ? queueTimeline.naiveBreachMinute !== null && queueTimeline.aiBreachMinute === null
+      ? `Incident-room verdict: naive breaches SLO at minute ${queueTimeline.naiveBreachMinute}; bias-adjusted stays below threshold ${queueTimeline.sloThreshold}.`
+      : queueTimeline.naiveBreachMinute !== null && queueTimeline.aiBreachMinute !== null
+        ? (() => {
+            const breachDelta = queueTimeline.aiBreachMinute - queueTimeline.naiveBreachMinute;
+            if (breachDelta > 0) {
+              return `Incident-room verdict: both breach, but bias-adjusted delays breach by ${formatInteger(breachDelta)} minutes.`;
+            }
+            if (breachDelta < 0) {
+              return `Incident-room verdict: both breach, and bias-adjusted breaches ${formatInteger(Math.abs(breachDelta))} minutes earlier; choose reliability mode.`;
+            }
+            return "Incident-room verdict: both breach at the same minute; gains come from lower sustained queue afterward.";
+          })()
+        : `Incident-room verdict: both stay under SLO threshold ${queueTimeline.sloThreshold}, with lower queue pressure on bias-adjusted policy.`
+    : "";
 
   const weeklyRequestsMillions = weeklyRequests / 1_000_000;
 
@@ -584,6 +633,9 @@ export function Home(): JSX.Element {
           <p className="usefulness-line" data-testid="usefulness-line">
             {score.usefulnessLine}
           </p>
+          <p className="operations-line" data-testid="operations-line">
+            {score.operationsLine}
+          </p>
           <p className="policy-diff-line" data-testid="policy-diff-line">
             {score.policyDiffLine}
           </p>
@@ -596,14 +648,29 @@ export function Home(): JSX.Element {
                   {timelineSummary}
                 </p>
               </div>
-              <button
-                type="button"
-                className="replay-button"
-                onClick={() => setReplayTick((prev) => prev + 1)}
-                data-testid="replay-simulation"
-              >
-                Replay simulation
-              </button>
+              <div className="timeline-actions">
+                <button
+                  type="button"
+                  className="replay-button"
+                  onClick={() => {
+                    if (!timelinePlaying && timelineMinute >= TIMELINE_TOTAL_MINUTES) {
+                      setTimelineMinute(0);
+                    }
+                    setTimelinePlaying((prev) => !prev);
+                  }}
+                  data-testid="timeline-play-toggle"
+                >
+                  {timelinePlaying ? "Pause timeline" : "Play timeline"}
+                </button>
+                <button
+                  type="button"
+                  className="replay-button"
+                  onClick={() => setReplayTick((prev) => prev + 1)}
+                  data-testid="replay-simulation"
+                >
+                  Replay simulation
+                </button>
+              </div>
             </div>
 
             <div className="timeline-rows" data-testid="timeline-chart">
@@ -647,6 +714,21 @@ export function Home(): JSX.Element {
             </div>
 
             <p className="timeline-footnote">Bars are unresolved incidents waiting in queue each minute.</p>
+            <input
+              type="range"
+              min={0}
+              max={TIMELINE_TOTAL_MINUTES}
+              step={1}
+              value={timelineMinute}
+              onChange={(event) => {
+                setTimelineMinute(Number(event.target.value));
+                setTimelinePlaying(false);
+              }}
+              data-testid="timeline-scrubber"
+            />
+            <p className="timeline-verdict" data-testid="timeline-verdict">
+              {timelineVerdict}
+            </p>
           </section>
 
           <div className="kpi-row">

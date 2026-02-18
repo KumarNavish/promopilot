@@ -177,6 +177,17 @@ input[type="range"] {
   font-weight: 700;
 }
 
+.operations-line {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid #dbeafe;
+  background: #f8fbff;
+  color: #1e3a5f;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .policy-diff-line {
   margin: 0;
   padding: 9px 10px;
@@ -220,6 +231,12 @@ input[type="range"] {
   color: #0f172a;
   font-size: 0.8rem;
   font-weight: 600;
+}
+
+.timeline-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .replay-button {
@@ -307,6 +324,17 @@ input[type="range"] {
   font-weight: 600;
 }
 
+.timeline-verdict {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1e3a5f;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
 .kpi-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -364,6 +392,10 @@ input[type="range"] {
   .impact-strip-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .timeline-actions {
+    flex-wrap: wrap;
   }
 
   .timeline-row {
