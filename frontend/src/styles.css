@@ -51,6 +51,47 @@ body {
   gap: 6px;
 }
 
+.compact-result {
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.recommendation-line {
+  margin: 0;
+  font-size: 1.02rem;
+  line-height: 1.45;
+  color: #0f3f48;
+  font-weight: 600;
+}
+
+.compact-kpis {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.compact-kpis article {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  padding: 10px;
+  background: #fff;
+}
+
+.compact-kpis article p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #53666d;
+}
+
+.compact-kpis article strong {
+  margin-top: 7px;
+  display: block;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.3rem;
+  color: #064149;
+}
+
 .hero-copy-block {
   flex: 1.05;
 }
@@ -646,6 +687,7 @@ th {
 
 @media (max-width: 980px) {
   .controls-grid,
+  .compact-kpis,
   .cards-grid,
   .recommendation-metrics,
   .moves-grid,
