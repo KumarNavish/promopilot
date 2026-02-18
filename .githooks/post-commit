@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -u
+
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+if [ -z "$branch" ] || [ "$branch" != "main" ]; then
+  exit 0
+fi
+
+(
+  attempt=1
+  while [ "$attempt" -le 6 ]; do
+    if git push origin "$branch" >/tmp/promopilot-auto-push.log 2>&1; then
+      exit 0
+    fi
+    sleep $((attempt * 5))
+    attempt=$((attempt + 1))
+  done
+) >/dev/null 2>&1 &
+
+exit 0
