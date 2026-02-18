@@ -77,13 +77,18 @@ export function Home(): JSX.Element {
 
     const naive = rollupMethod(results.naive);
     const dr = rollupMethod(results.dr);
+    const relativeDiscountReduction =
+      naive.avgDiscount > 0 ? ((naive.avgDiscount - dr.avgDiscount) / naive.avgDiscount) * 100 : 0;
+    const monthlyNetValueDelta = ((dr.netValue - naive.netValue) * MONTHLY_TRAFFIC_BASE) / 10_000;
 
     return {
       objectiveDelta: objective === "bookings" ? dr.bookings - naive.bookings : dr.netValue - naive.netValue,
       objectiveDigits: objective === "bookings" ? 1 : 0,
       objectiveLabel: objective === "bookings" ? "bookings" : "net value",
       discountDelta: dr.avgDiscount - naive.avgDiscount,
-      annualNetValueDelta: ((dr.netValue - naive.netValue) * MONTHLY_TRAFFIC_BASE * 12) / 10_000
+      monthlyNetValueDelta,
+      annualNetValueDelta: monthlyNetValueDelta * 12,
+      relativeDiscountReduction
     };
   }, [objective, results.dr, results.naive]);
 
@@ -93,16 +98,16 @@ export function Home(): JSX.Element {
     }
 
     if (scorecard.objectiveDelta >= 0 && scorecard.discountDelta <= 0) {
-      return `Recommendation: Launch bias-adjusted policy now. ${signed(
-        scorecard.objectiveDelta,
-        scorecard.objectiveDigits
-      )} ${scorecard.objectiveLabel} per 10k with ${Math.abs(scorecard.discountDelta).toFixed(1)} pp lower average discount.`;
+      return `Recommendation: launch bias-adjusted policy now. It outperforms naive policy while reducing discount intensity by ${Math.max(
+        scorecard.relativeDiscountReduction,
+        0
+      ).toFixed(0)}% and adds ${formatCurrency(scorecard.annualNetValueDelta)} annual net value at 1M users/month.`;
     }
 
-    return `Recommendation: Launch bias-adjusted policy with guardrails. ${signed(
+    return `Recommendation: launch bias-adjusted policy with guardrails. Expected impact is ${signed(
       scorecard.objectiveDelta,
       scorecard.objectiveDigits
-    )} ${scorecard.objectiveLabel} per 10k and discount shift ${signed(scorecard.discountDelta)} pp (DR - Naive).`;
+    )} ${scorecard.objectiveLabel} per 10k and ${formatCurrency(scorecard.annualNetValueDelta)} annual net value delta at 1M users/month.`;
   }, [scorecard]);
 
   const handleGenerate = useCallback(async (): Promise<void> => {
@@ -187,15 +192,15 @@ export function Home(): JSX.Element {
 
             <div className="compact-kpis">
               <article>
-                <p>Objective shift per 10k</p>
+                <p>Primary objective lift</p>
                 <strong data-testid="kpi-objective">{signed(scorecard.objectiveDelta, scorecard.objectiveDigits)}</strong>
               </article>
               <article>
-                <p>Avg discount shift (DR - Naive)</p>
-                <strong data-testid="kpi-discount">{signed(scorecard.discountDelta)} pp</strong>
+                <p>Discount intensity reduction</p>
+                <strong data-testid="kpi-discount">{Math.max(scorecard.relativeDiscountReduction, 0).toFixed(0)}%</strong>
               </article>
               <article>
-                <p>Annual net value impact (1M users/month)</p>
+                <p>Annual net value impact</p>
                 <strong data-testid="kpi-net-value">{formatCurrency(scorecard.annualNetValueDelta)}</strong>
               </article>
             </div>
