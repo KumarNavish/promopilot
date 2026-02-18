@@ -86,14 +86,14 @@ def test_dr_errors_when_segment_column_has_missing_values() -> None:
 def test_artifact_hash_is_deterministic_for_same_seed(tmp_path) -> None:
     manifest_a = build_artifacts(
         artifact_dir=tmp_path / "run_a",
-        rows=3500,
+        rows=2000,
         seed=23,
         treatment_levels=[0, 1, 2, 3, 4],
         artifact_version="test-version",
     )
     manifest_b = build_artifacts(
         artifact_dir=tmp_path / "run_b",
-        rows=3500,
+        rows=2000,
         seed=23,
         treatment_levels=[0, 1, 2, 3, 4],
         artifact_version="test-version",

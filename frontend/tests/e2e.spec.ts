@@ -1,13 +1,15 @@
 import { expect, test } from "@playwright/test";
 
-test("auto-demo runs on load and shows minimal actionable output", async ({ page }) => {
+test("interactive run produces decision and practical value", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByTestId("single-story")).toBeVisible();
-  await expect(page.getByTestId("single-story")).toContainText("Without AI you ship the naive policy");
+  await expect(page.getByTestId("version-chip")).toContainText("interactive-v2");
+  await expect(page.getByTestId("empty-state")).toContainText("click Run");
+
+  await page.getByTestId("generate-policy").click();
 
   await expect(page.getByTestId("results-block")).toBeVisible();
-  await expect(page.getByTestId("recommendation-line")).toBeVisible();
   await expect(page.getByTestId("recommendation-line")).toContainText("Decision:");
   await expect(page.getByTestId("policy-line")).toContainText("Policy to ship:");
   await expect(page.getByTestId("utility-card")).toBeVisible();

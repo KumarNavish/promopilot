@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ApiError,
   Objective,
@@ -46,6 +46,7 @@ interface ImpactScore {
 const DEFAULT_MAX_POLICY_LEVEL = 3;
 const WEEKLY_REQUESTS = 5_000_000;
 const WEEKLY_FACTOR = WEEKLY_REQUESTS / 10_000;
+const UI_VERSION = "interactive-v2";
 
 function formatInteger(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -186,6 +187,7 @@ function exportPolicyBundle(params: {
   const bundle = {
     generated_at_utc: new Date().toISOString(),
     artifact_version: dr.artifact_version,
+    ui_version: UI_VERSION,
     decision: {
       status: score.decision.status,
       summary: score.decision.line,
@@ -211,17 +213,7 @@ function exportPolicyBundle(params: {
     naive_reference_rules: naive.segments.map((segment) => ({
       segment: segment.segment,
       policy_level: segment.recommended_policy_level
-    })),
-    rollout_gates: [
-      "Keep rollout if objective delta vs naive remains >= 0 over trailing 24h.",
-      "Keep rollout only if incidents avoided vs naive remains >= 0 over trailing 24h.",
-      "Keep rollout only if latency delta vs naive remains <= 12 ms."
-    ],
-    rollback_triggers: [
-      "Rollback if incidents avoided vs naive is negative for 2 consecutive windows.",
-      "Rollback if latency delta exceeds 15 ms for 2 consecutive windows.",
-      "Rollback if primary objective delta vs naive is negative for 2 consecutive windows."
-    ]
+    }))
   };
 
   const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
@@ -239,11 +231,9 @@ export function Home(): JSX.Element {
   const [maxPolicyLevel, setMaxPolicyLevel] = useState<number>(DEFAULT_MAX_POLICY_LEVEL);
   const [segmentBy, setSegmentBy] = useState<SegmentBy>("prompt_risk");
   const [loading, setLoading] = useState(false);
-  const [autoLoaded, setAutoLoaded] = useState(false);
+  const [hasRun, setHasRun] = useState(false);
   const [results, setResults] = useState<{ naive?: RecommendResponse; dr?: RecommendResponse }>({});
   const [error, setError] = useState<UiError | null>(null);
-
-  const autoRunRef = useRef(false);
 
   const hasResults = Boolean(results.naive && results.dr);
   const naiveResult = results.naive;
@@ -270,6 +260,7 @@ export function Home(): JSX.Element {
       ]);
 
       setResults({ naive, dr });
+      setHasRun(true);
     } catch (err) {
       if (err instanceof ApiError) {
         setError({
@@ -281,17 +272,8 @@ export function Home(): JSX.Element {
       }
     } finally {
       setLoading(false);
-      setAutoLoaded(true);
     }
   }, [maxPolicyLevel, objective, segmentBy]);
-
-  useEffect(() => {
-    if (autoRunRef.current) {
-      return;
-    }
-    autoRunRef.current = true;
-    void runAnalysis();
-  }, [runAnalysis]);
 
   const score = useMemo<ImpactScore | null>(() => {
     if (!naiveResult || !drResult) {
@@ -337,10 +319,13 @@ export function Home(): JSX.Element {
     <main className="page-shell">
       <header className="panel hero" data-testid="hero">
         <p className="eyebrow">EdgeAlign-DR</p>
-        <h1>Auto-running policy recommendation</h1>
+        <h1>Interactive policy decision simulator</h1>
         <p className="hero-copy" data-testid="single-story">
-          Without AI you ship the naive policy from biased logs; this auto-run computes a safer, higher-impact policy and
-          gives a deployable bundle.
+          Change assumptions, click Run, and see the deployment decision, the cost of staying naive, and the exact bundle
+          to apply.
+        </p>
+        <p className="version-chip" data-testid="version-chip">
+          UI version: {UI_VERSION}
         </p>
       </header>
 
@@ -360,13 +345,7 @@ export function Home(): JSX.Element {
 
       {loading ? (
         <p className="loading-line" data-testid="loading-line">
-          Auto-demo running now...
-        </p>
-      ) : null}
-
-      {!loading && autoLoaded ? (
-        <p className="loading-line done" data-testid="loaded-line">
-          Auto-demo complete. Decision and deployment bundle are ready.
+          Running analysis...
         </p>
       ) : null}
 
@@ -435,8 +414,8 @@ export function Home(): JSX.Element {
           </button>
         </section>
       ) : (
-        <section className="panel empty-state">
-          <p>Preparing recommendation...</p>
+        <section className="panel empty-state" data-testid="empty-state">
+          <p>{hasRun ? "No recommendation available." : "Set assumptions and click Run to generate a decision."}</p>
         </section>
       )}
     </main>
