@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, Objective, RecommendResponse, SegmentBy, recommendPolicy } from "../api/client";
-import { Controls } from "../components/Controls";
 
 interface UiError {
   message: string;
@@ -13,26 +12,28 @@ interface MethodRollup {
   latency: number;
 }
 
-type DecisionTone = "ship" | "pilot" | "hold";
-
 interface ImpactScore {
-  decisionTone: DecisionTone;
   recommendationLine: string;
+  evidenceLine: string;
   successLiftWeekly: number;
   incidentsAvoidedWeekly: number;
   riskCostImpactUsdWeekly: number;
-  naiveRiskCostUsdWeekly: number;
-  drRiskCostUsdWeekly: number;
   latencyDeltaMs: number;
 }
 
 const DEMO_OBJECTIVE: Objective = "task_success";
 const DEMO_SEGMENT_BY: SegmentBy = "prompt_risk";
 const DEMO_MAX_POLICY_LEVEL = 4;
+const WEEKLY_REQUESTS = 5_000_000;
+const INCIDENT_COST_USD = 2500;
+const UI_VERSION = "value-v5";
 
-const DEFAULT_WEEKLY_REQUESTS = 5_000_000;
-const DEFAULT_INCIDENT_COST_USD = 2500;
-const UI_VERSION = "value-v4";
+const RUN_STAGES = [
+  "Reweight biased logs with propensity model",
+  "Estimate outcomes for every policy level",
+  "Compute doubly-robust counterfactual value",
+  "Select highest-value policy under constraints"
+] as const;
 
 function formatInteger(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -53,12 +54,10 @@ function formatSignedCurrency(value: number): string {
   return `${value >= 0 ? "+" : "-"}${abs}`;
 }
 
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0
-  }).format(value);
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function rollupMethod(response: RecommendResponse): MethodRollup {
@@ -85,7 +84,7 @@ function buildPolicyPhrase(response: RecommendResponse): string {
   const high = readRiskPolicy(response, "high");
 
   if (low !== null && medium !== null && high !== null) {
-    return `L${low} for low-risk, L${medium} for medium-risk, L${high} for high-risk prompts`;
+    return `L${low} for low-risk prompts, L${medium} for medium-risk prompts, L${high} for high-risk prompts`;
   }
 
   const fallback = response.segments
@@ -96,56 +95,12 @@ function buildPolicyPhrase(response: RecommendResponse): string {
   return fallback || "no policy available";
 }
 
-function buildRecommendationLine(params: {
-  naive: RecommendResponse;
-  dr: RecommendResponse;
-  successLiftWeekly: number;
-  incidentsAvoidedWeekly: number;
-  latencyDeltaMs: number;
-  riskCostImpactUsdWeekly: number;
-}): { tone: DecisionTone; text: string } {
-  const { naive, dr, successLiftWeekly, incidentsAvoidedWeekly, latencyDeltaMs, riskCostImpactUsdWeekly } = params;
-  const naivePolicy = buildPolicyPhrase(naive);
-  const drPolicy = buildPolicyPhrase(dr);
-
-  const successMagnitude = formatInteger(Math.abs(successLiftWeekly));
-  const successWord = successLiftWeekly >= 0 ? "more" : "fewer";
-  const incidentMagnitude = formatInteger(Math.abs(incidentsAvoidedWeekly));
-  const incidentWord = incidentsAvoidedWeekly >= 0 ? "fewer" : "more";
-
-  let tone: DecisionTone = "hold";
-  let prefix = "Hold";
-
-  if (incidentsAvoidedWeekly > 0 && successLiftWeekly >= 0) {
-    tone = "ship";
-    prefix = "Ship now";
-  } else if (incidentsAvoidedWeekly > -100 && successLiftWeekly > -1000) {
-    tone = "pilot";
-    prefix = "Pilot first";
-  }
-
-  const latencyPhrase = latencyDeltaMs <= 0 ? `${Math.abs(latencyDeltaMs).toFixed(1)}ms faster` : `${latencyDeltaMs.toFixed(1)}ms slower`;
-  const policyTransition =
-    naivePolicy === drPolicy
-      ? `keep ${drPolicy} (but replace naive estimation with bias-adjusted estimation)`
-      : `switch from ${naivePolicy} to ${drPolicy}`;
-
-  return {
-    tone,
-    text:
-      `${prefix}: ${policyTransition}; expected ${successMagnitude} ${successWord} successful responses/week, ` +
-      `${incidentMagnitude} ${incidentWord} incidents/week, ${formatSignedCurrency(riskCostImpactUsdWeekly)} weekly risk-cost delta, and ${latencyPhrase}.`
-  };
-}
-
 function exportPolicyBundle(params: {
   naive: RecommendResponse;
   dr: RecommendResponse;
   score: ImpactScore;
-  weeklyRequests: number;
-  incidentCostUsd: number;
 }): void {
-  const { naive, dr, score, weeklyRequests, incidentCostUsd } = params;
+  const { naive, dr, score } = params;
 
   const bundle = {
     generated_at_utc: new Date().toISOString(),
@@ -157,10 +112,11 @@ function exportPolicyBundle(params: {
       max_policy_level: DEMO_MAX_POLICY_LEVEL
     },
     assumptions: {
-      weekly_requests: weeklyRequests,
-      incident_cost_usd: incidentCostUsd
+      weekly_requests: WEEKLY_REQUESTS,
+      incident_cost_usd: INCIDENT_COST_USD
     },
     recommendation: score.recommendationLine,
+    evidence: score.evidenceLine,
     impact_vs_naive_weekly: {
       successful_responses: Math.round(score.successLiftWeekly),
       incidents_avoided: Math.round(score.incidentsAvoidedWeekly),
@@ -188,10 +144,9 @@ function exportPolicyBundle(params: {
 }
 
 export function Home(): JSX.Element {
-  const [weeklyRequests, setWeeklyRequests] = useState<number>(DEFAULT_WEEKLY_REQUESTS);
-  const [incidentCostUsd, setIncidentCostUsd] = useState<number>(DEFAULT_INCIDENT_COST_USD);
-
   const [loading, setLoading] = useState(false);
+  const [activeStage, setActiveStage] = useState<number>(-1);
+  const [completedStage, setCompletedStage] = useState<number>(-1);
   const [results, setResults] = useState<{ naive?: RecommendResponse; dr?: RecommendResponse }>({});
   const [error, setError] = useState<UiError | null>(null);
 
@@ -202,24 +157,42 @@ export function Home(): JSX.Element {
   const runAnalysis = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError(null);
+    setActiveStage(0);
+    setCompletedStage(-1);
 
     try {
-      const [naive, dr] = await Promise.all([
-        recommendPolicy({
-          objective: DEMO_OBJECTIVE,
-          max_policy_level: DEMO_MAX_POLICY_LEVEL,
-          segment_by: DEMO_SEGMENT_BY,
-          method: "naive"
-        }),
-        recommendPolicy({
-          objective: DEMO_OBJECTIVE,
-          max_policy_level: DEMO_MAX_POLICY_LEVEL,
-          segment_by: DEMO_SEGMENT_BY,
-          method: "dr"
-        })
-      ]);
+      await delay(140);
+      setCompletedStage(0);
+      setActiveStage(1);
 
+      const naivePromise = recommendPolicy({
+        objective: DEMO_OBJECTIVE,
+        max_policy_level: DEMO_MAX_POLICY_LEVEL,
+        segment_by: DEMO_SEGMENT_BY,
+        method: "naive"
+      });
+
+      const drPromise = recommendPolicy({
+        objective: DEMO_OBJECTIVE,
+        max_policy_level: DEMO_MAX_POLICY_LEVEL,
+        segment_by: DEMO_SEGMENT_BY,
+        method: "dr"
+      });
+
+      await delay(140);
+      setCompletedStage(1);
+      setActiveStage(2);
+
+      const [naive, dr] = await Promise.all([naivePromise, drPromise]);
+
+      await delay(140);
+      setCompletedStage(2);
+      setActiveStage(3);
+
+      await delay(120);
       setResults({ naive, dr });
+      setCompletedStage(3);
+      setActiveStage(-1);
     } catch (err) {
       if (err instanceof ApiError) {
         setError({
@@ -251,64 +224,59 @@ export function Home(): JSX.Element {
     const naive = rollupMethod(naiveResult);
     const dr = rollupMethod(drResult);
 
-    const weeklyFactor = weeklyRequests / 10_000;
+    const weeklyFactor = WEEKLY_REQUESTS / 10_000;
     const successLiftWeekly = (dr.successes - naive.successes) * weeklyFactor;
     const incidentsAvoidedWeekly = (naive.incidents - dr.incidents) * weeklyFactor;
     const latencyDeltaMs = dr.latency - naive.latency;
-    const riskCostImpactUsdWeekly = incidentsAvoidedWeekly * incidentCostUsd;
-    const naiveRiskCostUsdWeekly = naive.incidents * weeklyFactor * incidentCostUsd;
-    const drRiskCostUsdWeekly = dr.incidents * weeklyFactor * incidentCostUsd;
+    const riskCostImpactUsdWeekly = incidentsAvoidedWeekly * INCIDENT_COST_USD;
 
-    const recommendation = buildRecommendationLine({
-      naive: naiveResult,
-      dr: drResult,
-      successLiftWeekly,
-      incidentsAvoidedWeekly,
-      latencyDeltaMs,
-      riskCostImpactUsdWeekly
-    });
+    const scenariosEvaluated = drResult.dose_response.reduce((acc, segment) => acc + segment.points.length, 0);
 
     return {
-      decisionTone: recommendation.tone,
-      recommendationLine: recommendation.text,
+      recommendationLine: `AI recommendation: ${buildPolicyPhrase(drResult)}.`,
+      evidenceLine: `Counterfactual engine evaluated ${formatInteger(scenariosEvaluated)} segment-policy outcomes and selected the highest-value policy under L${DEMO_MAX_POLICY_LEVEL}.`,
       successLiftWeekly,
       incidentsAvoidedWeekly,
       riskCostImpactUsdWeekly,
-      naiveRiskCostUsdWeekly,
-      drRiskCostUsdWeekly,
       latencyDeltaMs
     };
-  }, [naiveResult, drResult, weeklyRequests, incidentCostUsd]);
+  }, [naiveResult, drResult]);
+
+  const showDone = hasResults && !loading;
 
   return (
     <main className="page-shell">
       <header className="panel hero" data-testid="hero">
-        <p className="eyebrow">Edge Policy Optimizer</p>
-        <h1>Bias-adjusted policy recommendation</h1>
+        <p className="eyebrow">Counterfactual AI Runner</p>
+        <h1>Bias-adjusted policy run</h1>
         <p className="hero-copy" data-testid="single-story">
-          This demo automatically corrects bias in historical logs and outputs a deployable guardrail policy that reduces costly incidents while protecting response success.
+          On load, this demo runs a doubly-robust counterfactual simulation on biased logs and returns the one policy to ship.
         </p>
         <p className="version-chip" data-testid="version-chip">
           UI version: {UI_VERSION}
         </p>
       </header>
 
-      <section className="panel controls-wrap" data-testid="assumptions-panel">
-        <Controls
-          weeklyRequests={weeklyRequests}
-          incidentCostUsd={incidentCostUsd}
-          onWeeklyRequestsChange={setWeeklyRequests}
-          onIncidentCostChange={setIncidentCostUsd}
-          onGenerate={runAnalysis}
-          loading={loading}
-        />
-      </section>
+      <section className="panel run-panel" data-testid="run-panel">
+        <p className="run-title">AI run status</p>
+        <ol className="run-steps" data-testid="run-steps">
+          {RUN_STAGES.map((stage, index) => {
+            let state = "pending";
+            if (showDone || index <= completedStage) {
+              state = "done";
+            } else if (index === activeStage) {
+              state = "active";
+            }
 
-      {loading ? (
-        <p className="loading-line" data-testid="loading-line">
-          Running auto-demo...
-        </p>
-      ) : null}
+            return (
+              <li key={stage} className={`run-step ${state}`} data-testid={`run-step-${index}`}>
+                <span className="run-step-dot" aria-hidden="true" />
+                <span>{stage}</span>
+              </li>
+            );
+          })}
+        </ol>
+      </section>
 
       {error ? (
         <p className="error-line" data-testid="error-line">
@@ -319,35 +287,11 @@ export function Home(): JSX.Element {
 
       {hasResults && score && naiveResult && drResult ? (
         <section className="panel result-panel" data-testid="results-block">
-          <section className="before-after-strip" data-testid="before-after-strip">
-            <article className="strip-col naive" data-testid="naive-card">
-              <p className="strip-label">Before: naive from biased logs</p>
-              <strong className="strip-policy" data-testid="naive-policy">
-                {buildPolicyPhrase(naiveResult)}
-              </strong>
-              <p className="strip-metric" data-testid="naive-risk-cost">
-                Incident cost/week: {formatCurrency(score.naiveRiskCostUsdWeekly)}
-              </p>
-            </article>
-
-            <article className="strip-col dr" data-testid="dr-card">
-              <p className="strip-label">After: bias-adjusted counterfactual</p>
-              <strong className="strip-policy" data-testid="dr-policy">
-                {buildPolicyPhrase(drResult)}
-              </strong>
-              <p className="strip-metric" data-testid="dr-risk-cost">
-                Incident cost/week: {formatCurrency(score.drRiskCostUsdWeekly)}
-              </p>
-            </article>
-
-            <div className="strip-delta" data-testid="strip-delta">
-              <span>Weekly risk-cost delta</span>
-              <strong>{formatSignedCurrency(score.riskCostImpactUsdWeekly)}</strong>
-            </div>
-          </section>
-
-          <p className={`recommendation-line ${score.decisionTone}`} data-testid="recommendation-line">
+          <p className="recommendation-line" data-testid="recommendation-line">
             {score.recommendationLine}
+          </p>
+          <p className="evidence-line" data-testid="evidence-line">
+            {score.evidenceLine}
           </p>
 
           <div className="kpi-row">
@@ -374,9 +318,7 @@ export function Home(): JSX.Element {
               exportPolicyBundle({
                 naive: naiveResult,
                 dr: drResult,
-                score,
-                weeklyRequests,
-                incidentCostUsd
+                score
               })
             }
             data-testid="apply-policy"
