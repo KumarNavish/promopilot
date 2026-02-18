@@ -18,6 +18,12 @@ interface PolicyProjection {
   riskCostUsd: number;
 }
 
+interface QueueTimeline {
+  minutes: number[];
+  naiveQueue: number[];
+  aiQueue: number[];
+}
+
 type PolicyMap = Record<string, number>;
 
 type OperatingMode = "reliability" | "throughput";
@@ -53,6 +59,8 @@ const DEMO_SEGMENT_BY: SegmentBy = "task_domain";
 const DEFAULT_WEEKLY_REQUESTS = 5_000_000;
 const DEFAULT_INCIDENT_COST_USD = 2500;
 const HOURS_PER_INCIDENT = 2.2;
+const TIMELINE_TOTAL_MINUTES = 12;
+const TIMELINE_TICK_MS = 420;
 
 const MODE_CONFIGS: Record<OperatingMode, ModeConfig> = {
   reliability: {
@@ -190,6 +198,38 @@ function buildPolicyDiffLine(naivePolicy: PolicyMap, aiPolicy: PolicyMap): strin
   return `Policy changes vs naive: ${changed.join(" | ")}.`;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function buildQueueTimeline(params: { naiveIncidents: number; aiIncidents: number }): QueueTimeline {
+  const { naiveIncidents, aiIncidents } = params;
+  const minutes = Array.from({ length: TIMELINE_TOTAL_MINUTES + 1 }, (_, minute) => minute);
+  const gapRatio = clamp((naiveIncidents - aiIncidents) / Math.max(naiveIncidents, 1), -0.6, 0.6);
+  const volumeScale = clamp(Math.log10(Math.max(naiveIncidents, aiIncidents, 1) + 10), 1.8, 7.5);
+
+  let naiveQueue = 16 + volumeScale * 5.2;
+  let aiQueue = Math.max(6, naiveQueue - 4 * gapRatio);
+  const naiveSlope = 1.4 + volumeScale * 0.4;
+  const aiSlope = naiveSlope - 2.4 - gapRatio * 5;
+
+  const naiveQueueSeries: number[] = [];
+  const aiQueueSeries: number[] = [];
+
+  for (let minute = 0; minute <= TIMELINE_TOTAL_MINUTES; minute += 1) {
+    naiveQueue = Math.max(0, naiveQueue + naiveSlope + Math.sin(minute / 2.2));
+    aiQueue = Math.max(0, aiQueue + aiSlope + 0.55 * Math.sin((minute + 1) / 2.6));
+    naiveQueueSeries.push(naiveQueue);
+    aiQueueSeries.push(aiQueue);
+  }
+
+  return {
+    minutes,
+    naiveQueue: naiveQueueSeries,
+    aiQueue: aiQueueSeries
+  };
+}
+
 function policyToRules(policy: PolicyMap): Array<{ segment: string; policy_level: number }> {
   return Object.entries(policy)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -288,6 +328,7 @@ export function Home(): JSX.Element {
   const [results, setResults] = useState<{ naive?: RecommendResponse; dr?: RecommendResponse }>({});
   const [error, setError] = useState<UiError | null>(null);
   const [replayTick, setReplayTick] = useState(0);
+  const [timelineMinute, setTimelineMinute] = useState(0);
 
   const modeConfig = MODE_CONFIGS[mode];
   const horizonConfig = HORIZON_CONFIGS[horizon];
@@ -396,17 +437,51 @@ export function Home(): JSX.Element {
   }, [horizonConfig.label, horizonConfig.weeks, incidentCostUsd, modeConfig.incidentPenalty, modeConfig.maxPolicyLevel, modeConfig.objective, results.dr, results.naive, weeklyRequests]);
 
   const animationKey = `${mode}|${horizon}|${weeklyRequests}|${incidentCostUsd}|${replayTick}`;
+  const queueTimeline = useMemo<QueueTimeline | null>(() => {
+    if (!score) {
+      return null;
+    }
+
+    return buildQueueTimeline({
+      naiveIncidents: score.naiveProjection.incidents,
+      aiIncidents: score.aiProjection.incidents
+    });
+  }, [score]);
+
+  useEffect(() => {
+    if (!queueTimeline) {
+      setTimelineMinute(0);
+      return;
+    }
+
+    setTimelineMinute(0);
+    const intervalId = window.setInterval(() => {
+      setTimelineMinute((current) => {
+        if (current >= TIMELINE_TOTAL_MINUTES) {
+          window.clearInterval(intervalId);
+          return current;
+        }
+        return current + 1;
+      });
+    }, TIMELINE_TICK_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [animationKey, queueTimeline]);
+
   const animatedSuccessLift = useAnimatedNumber(score?.successLift ?? 0, animationKey);
   const animatedIncidentsAvoided = useAnimatedNumber(score?.incidentsAvoided ?? 0, animationKey);
   const animatedRiskCost = useAnimatedNumber(score?.riskCostImpactUsd ?? 0, animationKey);
-  const animatedNaiveIncidents = useAnimatedNumber(score?.naiveProjection.incidents ?? 0, animationKey);
-  const animatedAiIncidents = useAnimatedNumber(score?.aiProjection.incidents ?? 0, animationKey);
-  const animatedNaiveSuccess = useAnimatedNumber(score?.naiveProjection.successes ?? 0, animationKey);
-  const animatedAiSuccess = useAnimatedNumber(score?.aiProjection.successes ?? 0, animationKey);
-
-  const incidentBarMax = Math.max(score?.naiveProjection.incidents ?? 0, score?.aiProjection.incidents ?? 0, 1);
-  const naiveIncidentWidth = ((score?.naiveProjection.incidents ?? 0) / incidentBarMax) * 100;
-  const aiIncidentWidth = ((score?.aiProjection.incidents ?? 0) / incidentBarMax) * 100;
+  const currentNaiveQueue = queueTimeline ? queueTimeline.naiveQueue[timelineMinute] : 0;
+  const currentAiQueue = queueTimeline ? queueTimeline.aiQueue[timelineMinute] : 0;
+  const animatedNaiveQueue = useAnimatedNumber(currentNaiveQueue ?? 0, `${animationKey}|minute-${timelineMinute}|naive`, 230);
+  const animatedAiQueue = useAnimatedNumber(currentAiQueue ?? 0, `${animationKey}|minute-${timelineMinute}|ai`, 230);
+  const timelineMaxQueue = Math.max(...(queueTimeline?.naiveQueue ?? [1]), ...(queueTimeline?.aiQueue ?? [1]), 1);
+  const timelineSummary =
+    currentNaiveQueue >= currentAiQueue
+      ? `Minute ${timelineMinute}: bias-adjusted queue is ${formatInteger(currentNaiveQueue - currentAiQueue)} incidents lower.`
+      : `Minute ${timelineMinute}: queue pressure is ${formatInteger(currentAiQueue - currentNaiveQueue)} incidents higher; investigate operating mode.`;
 
   const weeklyRequestsMillions = weeklyRequests / 1_000_000;
 
@@ -515,7 +590,12 @@ export function Home(): JSX.Element {
 
           <section className="impact-strip" data-testid="impact-strip">
             <div className="impact-strip-header">
-              <p>Before vs after simulation ({horizonConfig.label})</p>
+              <div className="timeline-title">
+                <p>Minute-by-minute queue stabilization</p>
+                <p className="timeline-summary" data-testid="timeline-minute">
+                  {timelineSummary}
+                </p>
+              </div>
               <button
                 type="button"
                 className="replay-button"
@@ -526,25 +606,47 @@ export function Home(): JSX.Element {
               </button>
             </div>
 
-            <div className="impact-grid">
-              <article className="impact-card naive" data-testid="naive-card">
-                <p className="impact-card-title">Naive targeting</p>
-                <p className="impact-card-metric">Successful outcomes: {formatInteger(animatedNaiveSuccess)}</p>
-                <p className="impact-card-metric">Incidents: {formatInteger(animatedNaiveIncidents)}</p>
-                <div className="impact-meter" aria-hidden="true">
-                  <span style={{ width: `${naiveIncidentWidth}%` }} />
+            <div className="timeline-rows" data-testid="timeline-chart">
+              <article className="timeline-row naive" data-testid="naive-card">
+                <p className="timeline-label">Naive queue</p>
+                <div className="timeline-track" aria-hidden="true">
+                  {queueTimeline?.minutes.map((minute, index) => {
+                    const queue = queueTimeline.naiveQueue[index];
+                    const height = (queue / timelineMaxQueue) * 100;
+                    const revealed = minute <= timelineMinute;
+                    return (
+                      <span
+                        key={`naive-${minute}`}
+                        className={`timeline-bar ${revealed ? "revealed" : ""} ${minute === timelineMinute ? "active" : ""}`}
+                        style={{ height: `${Math.max(10, height)}%` }}
+                      />
+                    );
+                  })}
                 </div>
+                <p className="timeline-value">{formatInteger(animatedNaiveQueue)}</p>
               </article>
 
-              <article className="impact-card ai" data-testid="ai-card">
-                <p className="impact-card-title">Bias-adjusted policy</p>
-                <p className="impact-card-metric">Successful outcomes: {formatInteger(animatedAiSuccess)}</p>
-                <p className="impact-card-metric">Incidents: {formatInteger(animatedAiIncidents)}</p>
-                <div className="impact-meter" aria-hidden="true">
-                  <span style={{ width: `${aiIncidentWidth}%` }} />
+              <article className="timeline-row ai" data-testid="ai-card">
+                <p className="timeline-label">Bias-adjusted queue</p>
+                <div className="timeline-track" aria-hidden="true">
+                  {queueTimeline?.minutes.map((minute, index) => {
+                    const queue = queueTimeline.aiQueue[index];
+                    const height = (queue / timelineMaxQueue) * 100;
+                    const revealed = minute <= timelineMinute;
+                    return (
+                      <span
+                        key={`ai-${minute}`}
+                        className={`timeline-bar ${revealed ? "revealed" : ""} ${minute === timelineMinute ? "active" : ""}`}
+                        style={{ height: `${Math.max(10, height)}%` }}
+                      />
+                    );
+                  })}
                 </div>
+                <p className="timeline-value">{formatInteger(animatedAiQueue)}</p>
               </article>
             </div>
+
+            <p className="timeline-footnote">Bars are unresolved incidents waiting in queue each minute.</p>
           </section>
 
           <div className="kpi-row">

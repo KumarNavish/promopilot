@@ -10,6 +10,8 @@ test("auto demo run shows immersive usefulness and interactivity", async ({ page
   await expect(page.getByTestId("controls")).toBeVisible();
   await expect(page.getByTestId("results-block")).toBeVisible();
   await expect(page.getByTestId("impact-strip")).toBeVisible();
+  await expect(page.getByText("Minute-by-minute queue stabilization")).toBeVisible();
+  await expect(page.getByTestId("timeline-minute")).toContainText("Minute");
   await expect(page.getByTestId("usefulness-line")).toContainText("Practical impact");
 
   const recommendationBefore = (await page.getByTestId("recommendation-line").textContent()) ?? "";
@@ -22,5 +24,6 @@ test("auto demo run shows immersive usefulness and interactivity", async ({ page
   await expect(page.getByTestId("weekly-slider")).toBeVisible();
   await expect(page.getByTestId("incident-cost-slider")).toBeVisible();
   await expect(page.getByTestId("replay-simulation")).toBeVisible();
+  await expect(page.getByTestId("timeline-chart")).toBeVisible();
   await expect(page.getByTestId("apply-policy")).toBeVisible();
 });
