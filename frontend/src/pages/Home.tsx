@@ -19,11 +19,21 @@ interface UiError {
 }
 
 const DEFAULT_MAX_DISCOUNT = 15;
+const MONTHLY_TRAFFIC_BASE = 1_000_000;
 
 interface MethodRollup {
   bookings: number;
   netValue: number;
   avgDiscount: number;
+}
+
+interface SegmentShift {
+  segment: string;
+  naiveDiscount: number;
+  drDiscount: number;
+  discountDelta: number;
+  bookingsDelta: number;
+  netValueDelta: number;
 }
 
 function exportPolicy(response: RecommendResponse | null): void {
@@ -89,6 +99,30 @@ function formatInteger(value: number): string {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
 }
 
+function computeSegmentShifts(naive: RecommendResponse, dr: RecommendResponse): SegmentShift[] {
+  const naiveMap = new Map(naive.segments.map((segment) => [segment.segment, segment]));
+  const shifts = dr.segments
+    .map((segment): SegmentShift | null => {
+      const before = naiveMap.get(segment.segment);
+      if (!before) {
+        return null;
+      }
+
+      return {
+        segment: segment.segment,
+        naiveDiscount: before.recommended_discount_pct,
+        drDiscount: segment.recommended_discount_pct,
+        discountDelta: segment.recommended_discount_pct - before.recommended_discount_pct,
+        bookingsDelta: segment.expected_bookings_per_10k - before.expected_bookings_per_10k,
+        netValueDelta: segment.expected_net_value_per_10k - before.expected_net_value_per_10k
+      };
+    })
+    .filter((shift): shift is SegmentShift => Boolean(shift))
+    .sort((a, b) => Math.abs(b.discountDelta) - Math.abs(a.discountDelta));
+
+  return shifts;
+}
+
 export function Home(): JSX.Element {
   const [objective, setObjective] = useState<Objective>("bookings");
   const [maxDiscountPct, setMaxDiscountPct] = useState<number>(DEFAULT_MAX_DISCOUNT);
@@ -124,6 +158,25 @@ export function Home(): JSX.Element {
       discountDelta: dr.avgDiscount - naive.avgDiscount
     };
   }, [results.dr, results.naive]);
+
+  const segmentShifts = useMemo(() => {
+    if (!results.naive || !results.dr) {
+      return [];
+    }
+    return computeSegmentShifts(results.naive, results.dr);
+  }, [results.dr, results.naive]);
+
+  const scaledImpact = useMemo(() => {
+    if (!scorecard) {
+      return null;
+    }
+    const multiplier = MONTHLY_TRAFFIC_BASE / 10_000;
+    return {
+      monthlyBookingsDelta: scorecard.bookingsDelta * multiplier,
+      monthlyNetValueDelta: scorecard.netValueDelta * multiplier,
+      annualNetValueDelta: scorecard.netValueDelta * multiplier * 12
+    };
+  }, [scorecard]);
 
   const wowHeadline = useMemo(() => {
     if (!scorecard) {
@@ -235,6 +288,38 @@ export function Home(): JSX.Element {
 
       {hasResults ? (
         <section className="results-stack" data-testid="results-block">
+          {scorecard && scaledImpact ? (
+            <section className="panel recommendation-panel" data-testid="recommendation-panel">
+              <p className="eyebrow">Recommended Action</p>
+              <h2>
+                Ship bias-adjusted policy for <strong>{segmentBy === "none" ? "all users" : segmentBy}</strong> with max{" "}
+                <strong>{maxDiscountPct}%</strong> discount.
+              </h2>
+              <p className="recommendation-copy">
+                This replaces naive conversion-led discounting with a policy that corrects targeting bias before allocating
+                promo spend.
+              </p>
+              <div className="recommendation-metrics">
+                <article>
+                  <p>Monthly bookings impact (at 1M users)</p>
+                  <strong>{signed(scaledImpact.monthlyBookingsDelta)}</strong>
+                </article>
+                <article>
+                  <p>Monthly net value impact (at 1M users)</p>
+                  <strong>{signed(scaledImpact.monthlyNetValueDelta, 0)}</strong>
+                </article>
+                <article>
+                  <p>Annual net value impact (at 1M users/month)</p>
+                  <strong>{signed(scaledImpact.annualNetValueDelta, 0)}</strong>
+                </article>
+                <article>
+                  <p>Average discount shift (DR - Naive)</p>
+                  <strong>{signed(scorecard.discountDelta)} pp</strong>
+                </article>
+              </div>
+            </section>
+          ) : null}
+
           {scorecard ? (
             <section className="panel wow-panel" data-testid="wow-panel">
               <p className="eyebrow">Decision Signal</p>
@@ -272,6 +357,41 @@ export function Home(): JSX.Element {
                     discount {scorecard.dr.avgDiscount.toFixed(1)}%
                   </p>
                 </article>
+              </div>
+            </section>
+          ) : null}
+
+          {segmentShifts.length > 0 ? (
+            <section className="panel shift-panel" data-testid="shift-panel">
+              <div className="shift-head">
+                <h3>What changes in the policy</h3>
+                <p>This is where naive over-discounting is corrected at segment level.</p>
+              </div>
+              <div className="shift-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Segment</th>
+                      <th>Naive discount</th>
+                      <th>Bias-adjusted discount</th>
+                      <th>Discount shift</th>
+                      <th>Bookings shift</th>
+                      <th>Net value shift</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {segmentShifts.map((shift) => (
+                      <tr key={`shift-${shift.segment}`}>
+                        <td>{shift.segment}</td>
+                        <td>{shift.naiveDiscount}%</td>
+                        <td>{shift.drDiscount}%</td>
+                        <td>{signed(shift.discountDelta)} pp</td>
+                        <td>{signed(shift.bookingsDelta)}</td>
+                        <td>{signed(shift.netValueDelta, 0)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </section>
           ) : null}
