@@ -40,7 +40,11 @@ interface TimelinePoint {
   minute: number;
   naiveQueue: number;
   aiQueue: number;
-  phase: "before" | "apply" | "settle" | "stable";
+}
+
+interface PathGeometry {
+  linePath: string;
+  areaPath: string;
 }
 
 const DEMO_SEGMENT_BY: SegmentBy = "task_domain";
@@ -147,7 +151,6 @@ function evaluatePolicy(response: RecommendResponse, policy: PolicyMap): MethodR
 }
 
 function buildSegmentDecisions(params: {
-  naive: RecommendResponse;
   dr: RecommendResponse;
   naivePolicy: PolicyMap;
   aiPolicy: PolicyMap;
@@ -208,8 +211,7 @@ function buildQueueTimeline(score: ImpactScore): TimelinePoint[] {
       points.push({
         minute,
         naiveQueue,
-        aiQueue: naiveQueue,
-        phase: "before"
+        aiQueue: naiveQueue
       });
       continue;
     }
@@ -218,8 +220,7 @@ function buildQueueTimeline(score: ImpactScore): TimelinePoint[] {
       points.push({
         minute,
         naiveQueue,
-        aiQueue: naiveBase * 0.82 + aiTarget * 0.18,
-        phase: "apply"
+        aiQueue: naiveBase * 0.82 + aiTarget * 0.18
       });
       continue;
     }
@@ -228,8 +229,7 @@ function buildQueueTimeline(score: ImpactScore): TimelinePoint[] {
       points.push({
         minute,
         naiveQueue,
-        aiQueue: aiTarget,
-        phase: "stable"
+        aiQueue: aiTarget
       });
       continue;
     }
@@ -242,12 +242,60 @@ function buildQueueTimeline(score: ImpactScore): TimelinePoint[] {
     points.push({
       minute,
       naiveQueue,
-      aiQueue,
-      phase: "settle"
+      aiQueue
     });
   }
 
   return points;
+}
+
+function buildPathGeometry(params: {
+  values: number[];
+  width: number;
+  height: number;
+  padX: number;
+  padY: number;
+  minValue: number;
+  maxValue: number;
+}): PathGeometry {
+  const { values, width, height, padX, padY, minValue, maxValue } = params;
+  if (values.length === 0) {
+    return { linePath: "", areaPath: "" };
+  }
+
+  const innerWidth = width - padX * 2;
+  const innerHeight = height - padY * 2;
+  const denominator = Math.max(values.length - 1, 1);
+  const valueRange = Math.max(maxValue - minValue, 1e-9);
+
+  const points = values.map((value, index) => {
+    const x = padX + (index / denominator) * innerWidth;
+    const normalized = (value - minValue) / valueRange;
+    const y = height - padY - normalized * innerHeight;
+    return { x, y };
+  });
+
+  const linePath = points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+    .join(" ");
+
+  const areaFloorY = (height - padY).toFixed(2);
+  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(2)} ${areaFloorY} L ${points[0].x.toFixed(2)} ${areaFloorY} Z`;
+
+  return { linePath, areaPath };
+}
+
+function interpolateSeries(values: number[], t: number): number {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  const bounded = clamp(t, 0, values.length - 1);
+  const left = Math.floor(bounded);
+  const right = Math.min(values.length - 1, left + 1);
+  const fraction = bounded - left;
+
+  return values[left] * (1 - fraction) + values[right] * fraction;
 }
 
 function useAnimatedNumber(target: number, animationKey: string, durationMs = 700): number {
@@ -376,7 +424,6 @@ export function Home(): JSX.Element {
     const aiEvalByDr = evaluatePolicy(results.dr, aiPolicy);
 
     const decisionRows = buildSegmentDecisions({
-      naive: results.naive,
       dr: results.dr,
       naivePolicy,
       aiPolicy
@@ -440,32 +487,134 @@ export function Home(): JSX.Element {
     ? Math.floor(frame / FRAMES_PER_MINUTE) % timelinePoints.length
     : 0;
   const minuteProgress = (frame % FRAMES_PER_MINUTE) / Math.max(FRAMES_PER_MINUTE - 1, 1);
+  const minuteFloat = activeMinute + minuteProgress;
 
+  const levelCount = focusDecision?.levels.length ?? 3;
   const naiveIndex = focusDecision ? focusDecision.levels.indexOf(focusDecision.naivePick) : 0;
   const aiIndex = focusDecision ? focusDecision.levels.indexOf(focusDecision.aiPick) : 0;
-  const levelCount = focusDecision?.levels.length ?? 3;
   const fromPct = levelCount > 1 ? (naiveIndex / (levelCount - 1)) * 100 : 50;
   const toPct = levelCount > 1 ? (aiIndex / (levelCount - 1)) * 100 : 50;
 
   const activationProgress = clamp(
-    (activeMinute - APPLY_MINUTE + minuteProgress) / Math.max(TIMELINE_MINUTES - APPLY_MINUTE - 1, 1),
+    (minuteFloat - APPLY_MINUTE) / Math.max(TIMELINE_MINUTES - APPLY_MINUTE - 1, 1),
     0,
     1
   );
   const tokenPct = fromPct + (toPct - fromPct) * activationProgress;
 
-  const storyLine = "AI spots bias in observed logs, corrects one policy action, and stabilizes the incident queue minute by minute.";
+  const timelineGeometry = useMemo(() => {
+    if (timelinePoints.length === 0) {
+      return null;
+    }
+
+    const width = 920;
+    const height = 212;
+    const padX = 28;
+    const padY = 18;
+
+    const naiveValues = timelinePoints.map((point) => point.naiveQueue);
+    const aiVisibleValues = timelinePoints.map((point, index) => (index <= activeMinute ? point.aiQueue : point.naiveQueue));
+    const aiFinalValues = timelinePoints.map((point) => point.aiQueue);
+
+    const allValues = [...naiveValues, ...aiFinalValues];
+    const maxValue = Math.max(...allValues) * 1.06;
+    const minValue = Math.min(...allValues) * 0.9;
+
+    const naive = buildPathGeometry({
+      values: naiveValues,
+      width,
+      height,
+      padX,
+      padY,
+      minValue,
+      maxValue
+    });
+
+    const aiVisible = buildPathGeometry({
+      values: aiVisibleValues,
+      width,
+      height,
+      padX,
+      padY,
+      minValue,
+      maxValue
+    });
+
+    const aiFinal = buildPathGeometry({
+      values: aiFinalValues,
+      width,
+      height,
+      padX,
+      padY,
+      minValue,
+      maxValue
+    });
+
+    const innerWidth = width - padX * 2;
+    const innerHeight = height - padY * 2;
+    const playheadX = padX + (minuteFloat / Math.max(timelinePoints.length - 1, 1)) * innerWidth;
+    const toY = (value: number): number => {
+      const normalized = (value - minValue) / Math.max(maxValue - minValue, 1e-9);
+      return height - padY - normalized * innerHeight;
+    };
+
+    const naivePointY = toY(interpolateSeries(naiveValues, minuteFloat));
+    const aiPointY = toY(interpolateSeries(aiVisibleValues, minuteFloat));
+
+    return {
+      width,
+      height,
+      padX,
+      padY,
+      naive,
+      aiVisible,
+      aiFinal,
+      playheadX,
+      naivePointY,
+      aiPointY,
+      xTicks: timelinePoints.map((point, index) => ({
+        minute: point.minute,
+        x: padX + (index / Math.max(timelinePoints.length - 1, 1)) * innerWidth
+      }))
+    };
+  }, [activeMinute, minuteFloat, timelinePoints]);
+
+  const beforeBars = useMemo(() => {
+    if (timelinePoints.length === 0) {
+      return [];
+    }
+    const bars = timelinePoints.slice(0, APPLY_MINUTE + 1).map((point) => point.naiveQueue);
+    const scale = Math.max(...bars, 1);
+    return bars.map((value) => (value / scale) * 100);
+  }, [timelinePoints]);
+
+  const afterBars = useMemo(() => {
+    if (timelinePoints.length === 0) {
+      return [];
+    }
+    const bars = timelinePoints.slice(APPLY_MINUTE).map((point) => point.aiQueue);
+    const scale = Math.max(...bars, 1);
+    return bars.map((value) => (value / scale) * 100);
+  }, [timelinePoints]);
+
+  const phaseLabel = activeMinute < APPLY_MINUTE
+    ? "Bias builds in the queue"
+    : activeMinute === APPLY_MINUTE
+      ? "AI correction applied"
+      : activeMinute >= TIMELINE_MINUTES - 1
+        ? "Queue stabilized"
+        : "Queue stabilizing";
+
+  const storyLine = "AI detects bias in observed policy logs and automatically corrects the action that stabilizes incident load minute by minute.";
 
   const metricAnimationKey = `${results.dr?.artifact_version ?? "none"}|${replayTick}`;
   const animatedChangedSegments = useAnimatedNumber(score?.changedSegments ?? 0, `changes|${metricAnimationKey}`);
   const animatedIncidentsAvoided = useAnimatedNumber(score?.incidentsAvoidedPer10k ?? 0, `incidents-avoided|${metricAnimationKey}`);
   const animatedSuccessGain = useAnimatedNumber(score?.successGainPer10k ?? 0, `success-gain|${metricAnimationKey}`);
 
-  const queueScale = Math.max(...timelinePoints.map((point) => Math.max(point.naiveQueue, point.aiQueue)), 1);
-
   const recommendationLine = focusDecision
     ? focusDecision.naivePick === focusDecision.aiPick
-      ? "AI recommendation: keep the current policy; no corrective action is needed."
+      ? "AI recommendation: keep the current policy; no corrective switch is needed."
       : `AI recommendation: switch ${cleanSegment(focusDecision.segment)} from ${policyLevelName(focusDecision.naivePick)} to ${policyLevelName(focusDecision.aiPick)}.`
     : "AI recommendation: evaluating policy changes.";
 
@@ -499,64 +648,97 @@ export function Home(): JSX.Element {
         </p>
       ) : null}
 
-      {score && results.dr && focusDecision && timelinePoints.length > 0 ? (
+      {score && results.dr && focusDecision && timelineGeometry ? (
         <section className="result-panel" data-testid="results-block">
-          <section className="visual-stage" data-testid="visual-first">
-            <div className="policy-lane" data-testid="policy-lane">
-              <p>AI correction</p>
-              <strong>{cleanSegment(focusDecision.segment)}</strong>
-              <div className="policy-track" data-testid="policy-track">
-                <div className="policy-slots">
-                  {focusDecision.levels.map((level) => (
-                    <span key={`slot-${level}`}>{policyLevelName(level)}</span>
+          <section className="narrative-canvas" data-testid="narrative-canvas">
+            <div className="story-strip" data-testid="story-strip">
+              <article className="story-node problem" data-testid="scene-problem">
+                <p>Observed drift</p>
+                <div className="micro-bars">
+                  {beforeBars.map((bar, index) => (
+                    <i key={`before-${index}`} style={{ height: `${20 + bar * 0.78}%` }} />
                   ))}
                 </div>
-                <i
-                  className="policy-link"
-                  style={{
-                    left: `${Math.min(fromPct, toPct)}%`,
-                    width: `${Math.max(4, Math.abs(toPct - fromPct))}%`,
-                    transform: `scaleX(${0.2 + activationProgress * 0.8})`,
-                    transformOrigin: fromPct <= toPct ? "left center" : "right center"
-                  }}
-                />
-                <i className="policy-token naive" style={{ left: `${fromPct}%` }} />
-                <i className="policy-token ai" style={{ left: `${tokenPct}%` }} />
-              </div>
+              </article>
+
+              <article className="story-node ai" data-testid="scene-ai">
+                <p>AI correction</p>
+                <div className="policy-orbit" data-testid="policy-orbit">
+                  <div className="orbit-slots">
+                    {focusDecision.levels.map((level) => (
+                      <span key={`slot-${level}`}>{policyLevelName(level)}</span>
+                    ))}
+                  </div>
+                  <i
+                    className="orbit-link"
+                    style={{
+                      left: `${Math.min(fromPct, toPct)}%`,
+                      width: `${Math.max(5, Math.abs(toPct - fromPct))}%`,
+                      transform: `scaleX(${0.2 + activationProgress * 0.8})`,
+                      transformOrigin: fromPct <= toPct ? "left center" : "right center"
+                    }}
+                  />
+                  <i className="orbit-node naive" style={{ left: `${fromPct}%` }} />
+                  <i className="orbit-node ai" style={{ left: `${tokenPct}%` }} />
+                </div>
+              </article>
+
+              <article className="story-node value" data-testid="scene-value">
+                <p>Stabilized queue</p>
+                <div className="micro-bars calm">
+                  {afterBars.map((bar, index) => (
+                    <i key={`after-${index}`} style={{ height: `${20 + bar * 0.78}%` }} />
+                  ))}
+                </div>
+              </article>
             </div>
 
-            <div className="queue-stage" data-testid="queue-stage">
-              <div className="queue-legend">
+            <div className="timeline-canvas" data-testid="timeline-canvas">
+              <div className="timeline-phase" data-testid="timeline-phase">{`${phaseLabel} • minute ${String(activeMinute).padStart(2, "0")}`}</div>
+              <svg
+                className="timeline-svg"
+                viewBox={`0 0 ${timelineGeometry.width} ${timelineGeometry.height}`}
+                role="img"
+                aria-label="Minute-by-minute queue stabilization"
+              >
+                <defs>
+                  <linearGradient id="aiArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="rgba(5,150,105,0.30)" />
+                    <stop offset="100%" stopColor="rgba(5,150,105,0.03)" />
+                  </linearGradient>
+                </defs>
+
+                {timelineGeometry.xTicks.map((tick) => (
+                  <line
+                    key={`tick-${tick.minute}`}
+                    x1={tick.x}
+                    y1={timelineGeometry.padY}
+                    x2={tick.x}
+                    y2={timelineGeometry.height - timelineGeometry.padY}
+                    className={`tick ${tick.minute === APPLY_MINUTE ? "apply" : ""}`}
+                  />
+                ))}
+
+                <path d={timelineGeometry.aiFinal.areaPath} className="area-ai" />
+                <path d={timelineGeometry.naive.linePath} className="line-naive" data-testid="line-naive" />
+                <path d={timelineGeometry.aiVisible.linePath} className="line-ai" data-testid="line-ai" />
+
+                <line
+                  x1={timelineGeometry.playheadX}
+                  y1={timelineGeometry.padY}
+                  x2={timelineGeometry.playheadX}
+                  y2={timelineGeometry.height - timelineGeometry.padY}
+                  className="playhead"
+                  data-testid="timeline-playhead"
+                />
+
+                <circle cx={timelineGeometry.playheadX} cy={timelineGeometry.naivePointY} r="5" className="dot-naive" />
+                <circle cx={timelineGeometry.playheadX} cy={timelineGeometry.aiPointY} r="5" className="dot-ai" />
+              </svg>
+
+              <div className="line-legend" data-testid="line-legend">
                 <span><i className="legend-dot naive" />Observed queue</span>
                 <span><i className="legend-dot ai" />Queue after AI correction</span>
-              </div>
-              <div className="timeline-shell" data-testid="queue-timeline">
-                <i
-                  className="timeline-scan"
-                  style={{ left: `${((activeMinute + minuteProgress) / Math.max(timelinePoints.length - 1, 1)) * 100}%` }}
-                />
-                <div className="timeline-grid">
-                  {timelinePoints.map((point, index) => {
-                    const naiveHeight = (point.naiveQueue / queueScale) * 100;
-                    const aiVisibleQueue = index <= activeMinute ? point.aiQueue : point.naiveQueue;
-                    const aiHeight = (aiVisibleQueue / queueScale) * 100;
-                    const className = [
-                      "queue-cell",
-                      index === activeMinute ? "active" : "",
-                      index === APPLY_MINUTE ? "apply" : "",
-                      index > activeMinute ? "future" : "",
-                      point.phase === "stable" ? "stable" : ""
-                    ].filter(Boolean).join(" ");
-
-                    return (
-                      <div className={className} key={`minute-${point.minute}`} data-testid={`timeline-minute-${point.minute}`}>
-                        <span className="queue-bar naive" style={{ height: `${18 + naiveHeight * 0.76}%` }} />
-                        <span className="queue-bar ai" style={{ height: `${18 + aiHeight * 0.76}%` }} />
-                        <span className="minute-label">{`M${String(point.minute).padStart(2, "0")}`}</span>
-                      </div>
-                    );
-                  })}
-                </div>
               </div>
             </div>
           </section>
