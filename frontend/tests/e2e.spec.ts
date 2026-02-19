@@ -10,12 +10,17 @@ test("auto demo run shows visual AI policy learning and operational impact", asy
 
   await expect(page.getByTestId("results-block")).toBeVisible();
   await expect(page.getByTestId("hero-story")).toContainText("AI corrected");
-  await expect(page.getByTestId("decision-strip")).toBeVisible();
-  await expect(page.getByTestId("decision-row-0")).toBeVisible();
+  await expect(page.getByTestId("spotlight")).toBeVisible();
+  await expect(page.getByTestId("lane-observed")).toBeVisible();
+  await expect(page.getByTestId("lane-corrected")).toBeVisible();
+  await expect(page.getByTestId("segment-tabs")).toBeVisible();
+  await expect(page.getByTestId("segment-tab-0")).toBeVisible();
 
   await page.waitForTimeout(900);
-  await expect(page.getByTestId("decision-row-1")).toBeVisible();
-  await expect(page.getByTestId("decision-row-2")).toBeVisible();
+  await expect(page.getByTestId("spotlight-step")).toBeVisible();
+  await page.getByTestId("segment-tab-1").click();
+  await expect(page.getByTestId("spotlight-step")).toContainText("2/");
+  await page.getByTestId("auto-tour").click();
 
   await expect(page.getByTestId("replay-simulation")).toBeVisible();
   await page.getByTestId("replay-simulation").click();

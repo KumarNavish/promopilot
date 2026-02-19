@@ -13,6 +13,9 @@ interface MethodRollup {
 
 interface SegmentDecision {
   segment: string;
+  levels: number[];
+  naiveNorm: number[];
+  drNorm: number[];
   naivePick: number;
   aiPick: number;
   biasAtNaive: number;
@@ -44,7 +47,7 @@ const DEMO_SEGMENT_BY: SegmentBy = "task_domain";
 const OBJECTIVE = "task_success" as const;
 const MAX_POLICY_LEVEL = 2;
 const INCIDENT_PENALTY = 4;
-const FRAMES_PER_ROW = 20;
+const FRAMES_PER_SEGMENT = 28;
 const FRAME_TICK_MS = 120;
 
 function formatInteger(value: number): string {
@@ -55,6 +58,11 @@ function formatInteger(value: number): string {
 
 function formatSignedNumber(value: number): string {
   return `${value >= 0 ? "+" : "-"}${formatInteger(Math.round(Math.abs(value)))}`;
+}
+
+function formatIncidentNarrative(value: number): string {
+  const absolute = formatInteger(Math.round(Math.abs(value)));
+  return value >= 0 ? `${absolute} fewer incidents` : `${absolute} more incidents`;
 }
 
 function cleanSegment(segment: string): string {
@@ -71,6 +79,20 @@ function utility(point: DoseResponsePoint): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function normalize(values: number[]): number[] {
+  if (values.length === 0) {
+    return values;
+  }
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (Math.abs(max - min) < 1e-9) {
+    return values.map(() => 0.5);
+  }
+
+  return values.map((value) => (value - min) / (max - min));
 }
 
 function optimizePolicy(response: RecommendResponse): PolicyMap {
@@ -149,26 +171,42 @@ function buildSegmentDecisions(params: {
       continue;
     }
 
+    const levels = drPoints.map((point) => point.policy_level);
     const drByLevel = new Map(drPoints.map((point) => [point.policy_level, point]));
     const naiveByLevel = naiveLookup.get(segment.segment);
 
-    const naivePick = naivePolicy[segment.segment] ?? drPoints[0].policy_level;
-    const aiPick = aiPolicy[segment.segment] ?? drPoints[0].policy_level;
+    const naiveUtilities = levels.map((level, index) => {
+      const fallback = drPoints[index];
+      const observed = naiveByLevel?.get(level) ?? fallback;
+      return utility(observed);
+    });
+    const drUtilities = levels.map((level, index) => {
+      const fallback = drPoints[index];
+      return utility(drByLevel.get(level) ?? fallback);
+    });
+
+    const naivePick = naivePolicy[segment.segment] ?? levels[0];
+    const aiPick = aiPolicy[segment.segment] ?? levels[0];
+
+    const naivePickIndex = levels.indexOf(naivePick);
+    const aiPickIndex = levels.indexOf(aiPick);
+
+    const observedNaiveUtility = naivePickIndex >= 0 ? naiveUtilities[naivePickIndex] : naiveUtilities[0];
+    const correctedNaiveUtility = naivePickIndex >= 0 ? drUtilities[naivePickIndex] : drUtilities[0];
+    const correctedAiUtility = aiPickIndex >= 0 ? drUtilities[aiPickIndex] : drUtilities[0];
 
     const drNaivePoint = drByLevel.get(naivePick) ?? drPoints[0];
     const drAiPoint = drByLevel.get(aiPick) ?? drPoints[0];
-    const naiveObservedPoint = naiveByLevel?.get(naivePick) ?? drNaivePoint;
-
-    const naiveObservedUtility = utility(naiveObservedPoint);
-    const naiveCorrectedUtility = utility(drNaivePoint);
-    const aiCorrectedUtility = utility(drAiPoint);
 
     rows.push({
       segment: segment.segment,
+      levels,
+      naiveNorm: normalize(naiveUtilities),
+      drNorm: normalize(drUtilities),
       naivePick,
       aiPick,
-      biasAtNaive: naiveObservedUtility - naiveCorrectedUtility,
-      utilityGain: aiCorrectedUtility - naiveCorrectedUtility,
+      biasAtNaive: observedNaiveUtility - correctedNaiveUtility,
+      utilityGain: correctedAiUtility - correctedNaiveUtility,
       incidentsAvoidedPer10k: drNaivePoint.incidents_per_10k - drAiPoint.incidents_per_10k,
       successGainPer10k: drAiPoint.successes_per_10k - drNaivePoint.successes_per_10k
     });
@@ -193,7 +231,7 @@ function policyToRules(policy: PolicyMap): Array<{ segment: string; policy_level
     }));
 }
 
-function useAnimatedNumber(target: number, animationKey: string, durationMs = 650): number {
+function useAnimatedNumber(target: number, animationKey: string, durationMs = 700): number {
   const [value, setValue] = useState(target);
   const previousTargetRef = useRef(target);
 
@@ -268,6 +306,7 @@ export function Home(): JSX.Element {
   const [error, setError] = useState<UiError | null>(null);
   const [replayTick, setReplayTick] = useState(0);
   const [frame, setFrame] = useState(0);
+  const [manualIndex, setManualIndex] = useState<number | null>(null);
 
   const runAnalysis = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -362,22 +401,17 @@ export function Home(): JSX.Element {
   }, [results.dr, results.naive]);
 
   useEffect(() => {
-    if (!score) {
+    if (!score || score.decisionRows.length === 0) {
       setFrame(0);
       return;
     }
 
     setFrame(0);
-    const totalFrames = score.decisionRows.length * FRAMES_PER_ROW + FRAMES_PER_ROW;
+    setManualIndex(null);
 
+    const totalFrames = Math.max(score.decisionRows.length * FRAMES_PER_SEGMENT, FRAMES_PER_SEGMENT);
     const intervalId = window.setInterval(() => {
-      setFrame((current) => {
-        if (current >= totalFrames) {
-          window.clearInterval(intervalId);
-          return current;
-        }
-        return current + 1;
-      });
+      setFrame((current) => (current + 1) % totalFrames);
     }, FRAME_TICK_MS);
 
     return () => {
@@ -385,30 +419,31 @@ export function Home(): JSX.Element {
     };
   }, [score, replayTick]);
 
+  const autoIndex = score && score.decisionRows.length > 0
+    ? Math.floor(frame / FRAMES_PER_SEGMENT) % score.decisionRows.length
+    : 0;
+  const activeIndex = manualIndex ?? autoIndex;
+  const activeDecision = score?.decisionRows[activeIndex];
+  const activeProgress = (frame % FRAMES_PER_SEGMENT) / Math.max(FRAMES_PER_SEGMENT - 1, 1);
+
   const storyLine = useMemo(() => {
     if (!score) {
       return "AI is replaying logged decisions and searching for the highest-utility policy.";
     }
 
-    const successCount = formatInteger(Math.round(Math.abs(score.successGainPer10k)));
-    const incidentCount = formatInteger(Math.round(Math.abs(score.incidentsAvoidedPer10k)));
-    const successDirection = score.successGainPer10k >= 0 ? "more successful outcomes" : "fewer successful outcomes";
-    const incidentDirection = score.incidentsAvoidedPer10k >= 0 ? "fewer incidents" : "more incidents";
-
-    if (score.changedSegments > 0) {
-      return `AI corrected ${score.changedSegments} biased decision and delivered ${successCount} ${successDirection} with ${incidentCount} ${incidentDirection} per 10k requests.`;
-    }
-
-    return `AI validated the current policy and estimates ${successCount} ${successDirection} with ${incidentCount} ${incidentDirection} per 10k requests.`;
+    return `AI corrected ${score.changedSegments} of ${score.totalSegments} policy picks, avoiding ${formatInteger(Math.round(Math.abs(score.incidentsAvoidedPer10k)))} incidents and adding ${formatInteger(Math.round(Math.abs(score.successGainPer10k)))} successful outcomes per 10k requests.`;
   }, [score]);
 
-  const metricAnimationKey = `${results.dr?.artifact_version ?? "none"}|${replayTick}`;
+  const metricAnimationKey = `${results.dr?.artifact_version ?? "none"}|${replayTick}|${activeIndex}`;
   const animatedChangedSegments = useAnimatedNumber(score?.changedSegments ?? 0, `changes|${metricAnimationKey}`);
   const animatedChangeSharePct = useAnimatedNumber(score?.changeSharePct ?? 0, `change-share|${metricAnimationKey}`);
   const animatedIncidentsAvoided = useAnimatedNumber(score?.incidentsAvoidedPer10k ?? 0, `incidents-avoided|${metricAnimationKey}`);
   const animatedSuccessGain = useAnimatedNumber(score?.successGainPer10k ?? 0, `success-gain|${metricAnimationKey}`);
   const animatedAiIncidents = useAnimatedNumber(score?.aiIncidentPer10k ?? 0, `ai-incidents|${metricAnimationKey}`);
   const animatedAiSuccess = useAnimatedNumber(score?.aiSuccessPer10k ?? 0, `ai-success|${metricAnimationKey}`);
+  const animatedActiveUtilityGain = useAnimatedNumber(activeDecision?.utilityGain ?? 0, `utility|${metricAnimationKey}`);
+  const animatedActiveSuccessGain = useAnimatedNumber(activeDecision?.successGainPer10k ?? 0, `row-success|${metricAnimationKey}`);
+  const animatedActiveIncidentGain = useAnimatedNumber(activeDecision?.incidentsAvoidedPer10k ?? 0, `row-incidents|${metricAnimationKey}`);
 
   return (
     <main className="page-shell" data-testid="home-shell">
@@ -440,58 +475,101 @@ export function Home(): JSX.Element {
         </p>
       ) : null}
 
-      {score && results.dr ? (
+      {score && results.dr && activeDecision ? (
         <section className="result-panel" data-testid="results-block">
           <p className="policy-line" data-testid="policy-line">
             <span>Ship now:</span> {score.policyLine}
           </p>
 
-          <section className="decision-strip" data-testid="decision-strip">
-            <div className="strip-head">
-              <span>Segment</span>
-              <span>Observed</span>
-              <span />
-              <span>AI</span>
-              <span>Measured delta / 10k</span>
+          <section className="spotlight" data-testid="spotlight">
+            <div className="spotlight-head">
+              <span className="spotlight-domain">{cleanSegment(activeDecision.segment)}</span>
+              <span className="spotlight-step" data-testid="spotlight-step">{`${activeIndex + 1}/${score.totalSegments}`}</span>
             </div>
 
-            {score.decisionRows.map((row, index) => {
-              const rowProgress = clamp((frame - index * FRAMES_PER_ROW) / FRAMES_PER_ROW, 0, 1);
-              const changed = row.naivePick !== row.aiPick;
-              const utilityWidth = clamp((Math.abs(row.utilityGain) / score.maxAbsUtilityGain) * 100, 8, 100) * rowProgress;
-              const incidentAbs = formatInteger(Math.round(Math.abs(row.incidentsAvoidedPer10k)));
-              const incidentToken = `${row.incidentsAvoidedPer10k >= 0 ? "-" : "+"}${incidentAbs} incidents`;
+            <div className="spotlight-grid">
+              <article className="lane-card" data-testid="lane-observed">
+                <p>Observed logs</p>
+                <div className="lane-bars naive">
+                  {activeDecision.levels.map((level, index) => (
+                    <span key={`naive-${level}`} className="bar-cell">
+                      <span
+                        className="bar-fill naive"
+                        style={{ height: `${24 + activeDecision.naiveNorm[index] * 66}%` }}
+                      />
+                      {activeDecision.naivePick === level ? <span className="bar-dot naive" /> : null}
+                      {activeDecision.naivePick === level && activeDecision.naivePick !== activeDecision.aiPick ? (
+                        <span className="bar-status wrong">x</span>
+                      ) : null}
+                    </span>
+                  ))}
+                </div>
+              </article>
 
-              return (
-                <article
-                  key={`decision-${row.segment}`}
-                  className={`decision-row ${changed ? "changed" : "same"}`}
-                  style={{
-                    opacity: 0.34 + rowProgress * 0.66,
-                    transform: `translateY(${(1 - rowProgress) * 8}px)`
-                  }}
-                  data-testid={`decision-row-${index}`}
+              <article className="delta-card" data-testid="delta-card">
+                <span
+                  className={`delta-arrow ${activeDecision.naivePick !== activeDecision.aiPick ? "changed" : "same"}`}
+                  style={{ transform: `translateX(${(activeDecision.aiPick - activeDecision.naivePick) * 7 * activeProgress}px)` }}
                 >
-                  <span className="segment-name">{cleanSegment(row.segment)}</span>
-                  <span className={`pick-pill naive ${changed ? "flagged" : "stable"}`}>{`L${row.naivePick}`}</span>
-                  <span className={`decision-arrow ${changed ? "changed" : "same"}`}>{changed ? "→" : "="}</span>
-                  <span className={`pick-pill ai ${changed ? "lifted" : "stable"}`}>{`L${row.aiPick}`}</span>
-                  <span className="impact-cell">
-                    <span className={`impact-text ${row.utilityGain >= 0 ? "good" : "bad"}`}>
-                      {`${formatSignedNumber(row.successGainPer10k)} success | ${incidentToken}`}
+                  →
+                </span>
+                <strong className={animatedActiveUtilityGain >= 0 ? "good" : "bad"}>
+                  {`${formatSignedNumber(animatedActiveUtilityGain)} utility`}
+                </strong>
+                <small className={animatedActiveIncidentGain >= 0 ? "good" : "bad"}>
+                  {`${formatSignedNumber(animatedActiveSuccessGain)} success | ${formatIncidentNarrative(animatedActiveIncidentGain)}`}
+                </small>
+                {activeDecision.naivePick !== activeDecision.aiPick ? (
+                  <em title={`Observed logs overstated this pick by ${formatSignedNumber(activeDecision.biasAtNaive)} utility`}>
+                    bias corrected
+                  </em>
+                ) : null}
+              </article>
+
+              <article className="lane-card" data-testid="lane-corrected">
+                <p>AI corrected</p>
+                <div className="lane-bars ai" style={{ opacity: 0.62 + activeProgress * 0.38 }}>
+                  {activeDecision.levels.map((level, index) => (
+                    <span key={`ai-${level}`} className="bar-cell">
+                      <span
+                        className="bar-fill ai"
+                        style={{ height: `${24 + activeDecision.drNorm[index] * 66}%` }}
+                      />
+                      {activeDecision.aiPick === level ? <span className="bar-dot ai" /> : null}
+                      {activeDecision.aiPick === level ? <span className="bar-status right">v</span> : null}
                     </span>
-                    <span className="impact-meter">
-                      <i className={row.utilityGain >= 0 ? "good" : "bad"} style={{ width: `${utilityWidth}%` }} />
-                    </span>
-                  </span>
-                  {changed ? (
-                    <span className="bias-flag" title={`Observed logs overstated this pick by ${formatSignedNumber(row.biasAtNaive)} utility`}>
-                      bias corrected
-                    </span>
-                  ) : null}
-                </article>
-              );
-            })}
+                  ))}
+                </div>
+              </article>
+            </div>
+
+            <div className="level-scale" data-testid="level-scale">
+              {activeDecision.levels.map((level) => (
+                <span key={`scale-${level}`}>{`L${level}`}</span>
+              ))}
+            </div>
+
+            <div className="segment-tabs" data-testid="segment-tabs">
+              {score.decisionRows.map((row, index) => (
+                <button
+                  key={`tab-${row.segment}`}
+                  type="button"
+                  className={`segment-tab ${index === activeIndex ? "active" : ""}`}
+                  onClick={() => setManualIndex(index)}
+                  data-testid={`segment-tab-${index}`}
+                >
+                  {cleanSegment(row.segment)}
+                </button>
+              ))}
+              <button
+                type="button"
+                className={`segment-tab auto ${manualIndex === null ? "active" : ""}`}
+                onClick={() => setManualIndex(null)}
+                data-testid="auto-tour"
+              >
+                auto
+              </button>
+            </div>
           </section>
 
           <div className="kpi-row">
@@ -503,7 +581,7 @@ export function Home(): JSX.Element {
 
             <article className="kpi-card" data-testid="kpi-incidents">
               <p>Incidents avoided / 10k</p>
-              <strong>{`${formatInteger(Math.round(Math.abs(animatedIncidentsAvoided)))} ${animatedIncidentsAvoided >= 0 ? "fewer" : "more"}`}</strong>
+              <strong>{formatIncidentNarrative(animatedIncidentsAvoided)}</strong>
               <small className={animatedIncidentsAvoided >= 0 ? "good" : "bad"}>
                 {`${formatInteger(score.naiveIncidentPer10k)} -> ${formatInteger(animatedAiIncidents)}`}
               </small>
