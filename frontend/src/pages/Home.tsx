@@ -467,6 +467,7 @@ export function Home(): JSX.Element {
   const animatedAiSuccess = useAnimatedNumber(score?.aiSuccessPer10k ?? 0, `ai-success|${metricAnimationKey}`);
   const animatedActiveSuccessGain = useAnimatedNumber(activeDecision?.successGainPer10k ?? 0, `row-success|${metricAnimationKey}`);
   const animatedActiveIncidentGain = useAnimatedNumber(activeDecision?.incidentsAvoidedPer10k ?? 0, `row-incidents|${metricAnimationKey}`);
+  const revealStage = Math.min(2, Math.floor(activeProgress * 3));
   const maxBiasMagnitude = Math.max(...(score?.decisionRows.map((row) => Math.abs(row.biasAtNaive)) ?? [1]), 1e-9);
   const activeBiasMagnitude = Math.abs(activeDecision?.biasAtNaive ?? 0);
   const activeBiasPct = (activeBiasMagnitude / maxBiasMagnitude) * 100;
@@ -510,7 +511,7 @@ export function Home(): JSX.Element {
       {score && results.dr && activeDecision ? (
         <section className="result-panel" data-testid="results-block">
           <section className="mission-rail" data-testid="mission-rail">
-            <article className="mission-card problem" data-testid="mission-problem">
+            <article className={`mission-card problem ${revealStage === 0 ? "active" : ""}`} data-testid="mission-problem">
               <p>Problem</p>
               <strong>Biased history</strong>
               <div className="mission-meter">
@@ -518,17 +519,18 @@ export function Home(): JSX.Element {
               </div>
             </article>
 
-            <article className="mission-card action" data-testid="mission-action">
+            <article className={`mission-card action ${revealStage === 1 ? "active" : ""}`} data-testid="mission-action">
               <p>AI action</p>
               <strong>{activeDecision.naivePick === activeDecision.aiPick ? "Validate pick" : "Switch pick"}</strong>
               <div className="mission-swap">
                 <span>{policyLevelAxis(activeDecision.naivePick)}</span>
                 <span>→</span>
                 <span>{policyLevelAxis(activeDecision.aiPick)}</span>
+                <i className="mission-swap-token" style={{ left: `${20 + activeProgress * 60}%` }} />
               </div>
             </article>
 
-            <article className="mission-card value" data-testid="mission-value">
+            <article className={`mission-card value ${revealStage === 2 ? "active" : ""}`} data-testid="mission-value">
               <p>Usefulness</p>
               <strong>Safer and higher success</strong>
               <div className="mission-delta">
@@ -549,7 +551,7 @@ export function Home(): JSX.Element {
             </div>
 
             <div className="spotlight-grid">
-              <article className="lane-card" data-testid="lane-observed">
+              <article className={`lane-card ${revealStage === 0 ? "focus-problem" : ""}`} data-testid="lane-observed">
                 <p>Observed</p>
                 <div className="lane-bars naive">
                   {activeDecision.levels.map((level, index) => (
@@ -561,6 +563,7 @@ export function Home(): JSX.Element {
                         className="bar-fill naive"
                         style={{ height: `${24 + activeDecision.naiveNorm[index] * 66}%` }}
                       />
+                      {activeDecision.naivePick === level ? <span className="bar-glow current" style={{ opacity: 0.3 + activeProgress * 0.7 }} /> : null}
                       {activeDecision.naivePick === level ? <span className="bar-label current">Current</span> : null}
                     </span>
                   ))}
@@ -569,6 +572,7 @@ export function Home(): JSX.Element {
 
               <article className="delta-card" data-testid="delta-card">
                 <div className="decision-swap" data-testid="decision-swap">
+                  <i className={`swap-beam stage-${revealStage}`} style={{ transform: `scaleX(${0.2 + activeProgress * 0.8})` }} />
                   <span className="policy-chip current">{policyLevelName(activeDecision.naivePick)}</span>
                   <span className="swap-arrow">→</span>
                   <span className="policy-chip ai">{policyLevelName(activeDecision.aiPick)}</span>
@@ -583,7 +587,7 @@ export function Home(): JSX.Element {
                 </div>
               </article>
 
-              <article className="lane-card" data-testid="lane-corrected">
+              <article className={`lane-card ${revealStage === 1 || revealStage === 2 ? "focus-ai" : ""}`} data-testid="lane-corrected">
                 <p>AI corrected</p>
                 <div className="lane-bars ai" style={{ opacity: 0.62 + activeProgress * 0.38 }}>
                   {activeDecision.levels.map((level, index) => (
@@ -595,6 +599,7 @@ export function Home(): JSX.Element {
                         className="bar-fill ai"
                         style={{ height: `${24 + activeDecision.drNorm[index] * 66}%` }}
                       />
+                      {activeDecision.aiPick === level ? <span className="bar-glow ai" style={{ opacity: 0.45 + activeProgress * 0.55 }} /> : null}
                       {activeDecision.aiPick === level ? <span className="bar-label ai">AI choice</span> : null}
                     </span>
                   ))}
@@ -636,7 +641,7 @@ export function Home(): JSX.Element {
             <span><i className="legend-dot ai" />AI</span>
           </div>
 
-          <div className="kpi-row">
+          <div className={`kpi-row ${revealStage === 2 ? "value-focus" : ""}`}>
             <article className="kpi-card" data-testid="kpi-changes">
               <p>Policies corrected</p>
               <strong>{`${Math.round(animatedChangedSegments)} of ${score.totalSegments} decisions`}</strong>
