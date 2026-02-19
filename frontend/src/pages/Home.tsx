@@ -467,14 +467,11 @@ export function Home(): JSX.Element {
 
   const activePhase = Math.min(PHASES.length - 1, Math.floor(frame / FRAMES_PER_PHASE));
   const phaseProgress = (frame % FRAMES_PER_PHASE) / Math.max(FRAMES_PER_PHASE - 1, 1);
-  const naiveOpacity = activePhase === 0 ? 1 : activePhase === 1 ? 1 - phaseProgress : 0.18;
-  const drOpacity = activePhase === 0 ? 0 : activePhase === 1 ? phaseProgress : 1;
-  const showNaivePick = activePhase >= 2;
-  const aiPickOpacity = activePhase < 2 ? 0 : activePhase === 2 ? phaseProgress : 1;
   const displayLevels = score?.segmentVisuals[0]?.levels ?? [0, 1, 2];
-  const maxDisplayLevel = Math.max(...displayLevels, 1);
-  const biasOverlayStrength = activePhase === 0 ? 0 : activePhase === 1 ? phaseProgress : activePhase === 2 ? 0.62 : 0.44;
-  const boardColumns = `minmax(130px, 1.6fr) repeat(${displayLevels.length}, minmax(58px, 1fr))`;
+  const naiveLaneOpacity = activePhase < 2 ? 1 : 0.52;
+  const aiLaneOpacity = activePhase === 0 ? 0.26 : activePhase === 1 ? 0.26 + phaseProgress * 0.34 : 1;
+  const aiPickOpacity = activePhase < 2 ? 0 : activePhase === 2 ? phaseProgress : 1;
+  const shiftOpacity = activePhase < 2 ? 0 : activePhase === 2 ? phaseProgress : 1;
 
   return (
     <main className="page-shell" data-testid="home-shell">
@@ -517,93 +514,82 @@ export function Home(): JSX.Element {
             ))}
           </div>
 
-          <section className="learning-board" data-testid="learning-board">
-            <div className="board-head" style={{ gridTemplateColumns: boardColumns }}>
-              <span className="board-corner" />
-              {displayLevels.map((level) => (
-                <span key={level} className="board-level">{`L${level}`}</span>
-              ))}
+          <section className="decision-film" data-testid="decision-film">
+            <div className="film-head">
+              <span />
+              <span className="film-col">Naive</span>
+              <span className="film-col" />
+              <span className="film-col">AI</span>
             </div>
 
-            {score.segmentVisuals.map((row) => (
-              <div key={row.segment} className="board-row" style={{ gridTemplateColumns: boardColumns }}>
-                <span className="row-label">{cleanSegment(row.segment)}</span>
-                {row.levels.map((level, index) => {
-                  const naiveHeight = 18 + row.naiveNorm[index] * 82;
-                  const drHeight = 18 + row.drNorm[index] * 82;
-                  const aiWin = row.aiPick === level && activePhase >= 3;
-                  const biasIsOverestimate = row.biasGap[index] > 0;
-                  const biasOpacity = row.biasNorm[index] * biasOverlayStrength;
-                  const biasColor = biasIsOverestimate ? "225, 29, 72" : "14, 165, 233";
-
-                  return (
-                    <div key={`${row.segment}-${level}`} className={`utility-cell ${aiWin ? "ai-win" : ""}`}>
-                      <span
-                        className="bias-layer"
-                        style={{ backgroundColor: `rgba(${biasColor}, ${biasOpacity})` }}
-                      />
-                      <span
-                        className="utility-fill naive"
-                        style={{ height: `${naiveHeight}%`, opacity: naiveOpacity }}
-                      />
-                      <span
-                        className="utility-fill dr"
-                        style={{ height: `${drHeight}%`, opacity: drOpacity }}
-                      />
-
-                      {showNaivePick && row.naivePick === level ? <span className="pick naive" /> : null}
-                      {row.aiPick === level ? <span className="pick ai" style={{ opacity: aiPickOpacity }} /> : null}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </section>
-
-          <section className="switch-board" data-testid="switch-board">
             {score.segmentVisuals.map((row) => {
-              const naiveLeft = (row.naivePick / maxDisplayLevel) * 100;
-              const aiLeft = (row.aiPick / maxDisplayLevel) * 100;
-              const linkLeft = Math.min(naiveLeft, aiLeft);
-              const linkWidth = Math.max(1.5, Math.abs(aiLeft - naiveLeft));
+              const naivePickIndex = row.levels.indexOf(row.naivePick);
+              const aiPickIndex = row.levels.indexOf(row.aiPick);
+              const biasAtNaive = naivePickIndex >= 0 ? row.biasNorm[naivePickIndex] : 0;
+              const drift = aiPickIndex - naivePickIndex;
+              const driftArrow = drift === 0 ? "→" : drift > 0 ? "↗" : "↘";
 
               return (
-                <div key={`switch-${row.segment}`} className="switch-row">
-                  <span className="row-label">{cleanSegment(row.segment)}</span>
-                  <div className="switch-track">
-                    {row.levels.map((level) => (
-                      <span
-                        key={`${row.segment}-tick-${level}`}
-                        className="switch-tick"
-                        style={{ left: `${(level / maxDisplayLevel) * 100}%` }}
-                      />
+                <div key={`film-${row.segment}`} className="film-row">
+                  <span className="film-label">{cleanSegment(row.segment)}</span>
+
+                  <div className="film-lane naive" style={{ opacity: naiveLaneOpacity }}>
+                    {row.levels.map((level, index) => (
+                      <span key={`${row.segment}-naive-${level}`} className="lane-cell">
+                        <span
+                          className="lane-fill naive"
+                          style={{ height: `${22 + row.naiveNorm[index] * 70}%` }}
+                        />
+                        <span
+                          className="lane-bias"
+                          style={{ opacity: row.biasNorm[index] * (activePhase < 1 ? 0 : 0.85) }}
+                        />
+                        {row.naivePick === level ? (
+                          <span
+                            className="lane-dot naive"
+                            style={{
+                              boxShadow: `0 0 0 ${2 + biasAtNaive * 6}px rgba(225, 29, 72, ${0.16 + biasAtNaive * 0.42})`
+                            }}
+                          />
+                        ) : null}
+                      </span>
                     ))}
-                    <span
-                      className="switch-link"
-                      style={{
-                        left: `${linkLeft}%`,
-                        width: `${linkWidth}%`,
-                        opacity: activePhase < 2 ? 0 : activePhase === 2 ? phaseProgress : 1
-                      }}
-                    />
-                    <span className="switch-dot naive" style={{ left: `${naiveLeft}%`, opacity: showNaivePick ? 1 : 0 }} />
-                    <span className="switch-dot ai" style={{ left: `${aiLeft}%`, opacity: aiPickOpacity }} />
+                  </div>
+
+                  <span className={`film-shift ${drift === 0 ? "same" : "changed"}`} style={{ opacity: shiftOpacity }}>
+                    {driftArrow}
+                  </span>
+
+                  <div className="film-lane ai" style={{ opacity: aiLaneOpacity }}>
+                    {row.levels.map((level, index) => (
+                      <span key={`${row.segment}-ai-${level}`} className="lane-cell">
+                        <span
+                          className="lane-fill ai"
+                          style={{ height: `${22 + row.drNorm[index] * 70}%` }}
+                        />
+                        {row.aiPick === level ? <span className="lane-dot ai" style={{ opacity: aiPickOpacity }} /> : null}
+                      </span>
+                    ))}
                   </div>
                 </div>
               );
             })}
-          </section>
 
-          <div className="legend" data-testid="legend">
-            <span>
-              <i className="pick naive" />
-              naive
-            </span>
-            <span>
-              <i className="pick ai" />
-              ai
-            </span>
-          </div>
+            <div className="film-levels">
+              <span />
+              <div className="film-level-values">
+                {displayLevels.map((level) => (
+                  <span key={`lvl-left-${level}`}>{`L${level}`}</span>
+                ))}
+              </div>
+              <span />
+              <div className="film-level-values">
+                {displayLevels.map((level) => (
+                  <span key={`lvl-right-${level}`}>{`L${level}`}</span>
+                ))}
+              </div>
+            </div>
+          </section>
 
           <div className="kpi-row">
             <article className="kpi-card" data-testid="kpi-incidents">

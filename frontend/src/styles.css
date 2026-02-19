@@ -118,175 +118,120 @@ h1 {
   transform: translateY(-1px);
 }
 
-.learning-board {
+.decision-film {
   border: 1px solid #d6e6f6;
   border-radius: 12px;
-  background: #f8fcff;
+  background: #f8fbff;
   padding: 10px;
   display: grid;
   gap: 7px;
 }
 
-.board-head,
-.board-row {
+.film-head,
+.film-row,
+.film-levels {
   display: grid;
-  gap: 6px;
+  grid-template-columns: minmax(130px, 1.4fr) minmax(0, 1fr) 44px minmax(0, 1fr);
   align-items: center;
+  gap: 8px;
 }
 
-.board-corner {
-  height: 1px;
-}
-
-.board-level {
+.film-col,
+.film-shift {
   text-align: center;
   font-size: 0.74rem;
   font-weight: 700;
-  color: #335776;
+  color: #395777;
 }
 
-.row-label {
+.film-label {
   font-size: 0.78rem;
   font-weight: 700;
   color: #1e3a5f;
   text-transform: capitalize;
 }
 
-.utility-cell {
+.film-lane {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  transition: opacity 220ms ease;
+}
+
+.lane-cell {
   position: relative;
-  height: 84px;
-  border: 1px solid #d4e3f3;
+  height: 72px;
+  border: 1px solid #d5e3f2;
   border-radius: 10px;
   background: #ffffff;
   overflow: hidden;
 }
 
-.bias-layer {
+.lane-fill {
   position: absolute;
-  inset: 0;
-  transition: background-color 220ms ease;
-}
-
-.utility-fill {
-  position: absolute;
+  left: 50%;
   bottom: 4px;
-  width: 32%;
+  width: 62%;
+  transform: translateX(-50%);
   border-radius: 6px 6px 4px 4px;
-  transition: height 220ms ease, opacity 220ms ease;
+  transition: height 220ms ease;
 }
 
-.utility-fill.naive {
-  left: 14%;
+.lane-fill.naive {
   background: linear-gradient(180deg, #fda4af, #e11d48);
 }
 
-.utility-fill.dr {
-  right: 14%;
-  background: linear-gradient(180deg, #86efac, #059669);
+.lane-fill.ai {
+  background: linear-gradient(180deg, #6ee7b7, #059669);
 }
 
-.pick {
+.lane-bias {
+  position: absolute;
+  inset: 0;
+  background: rgba(225, 29, 72, 0.5);
+  transition: opacity 180ms ease;
+}
+
+.lane-dot {
   position: absolute;
   top: 7px;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-}
-
-.pick.naive {
-  left: 22%;
-  background: #e11d48;
-}
-
-.pick.ai {
-  right: 22%;
-  background: #059669;
-}
-
-.utility-cell.ai-win {
-  box-shadow: inset 0 0 0 2px rgba(5, 150, 105, 0.32);
-}
-
-.switch-board {
-  border: 1px solid #d6e6f6;
-  border-radius: 12px;
-  background: #f8fbff;
-  padding: 10px;
-  display: grid;
-  gap: 8px;
-}
-
-.switch-row {
-  display: grid;
-  grid-template-columns: minmax(130px, 1.6fr) minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-}
-
-.switch-track {
-  position: relative;
-  height: 26px;
-  border: 1px solid #d7e4f2;
-  border-radius: 999px;
-  background: #ffffff;
-}
-
-.switch-tick {
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  width: 2px;
-  background: #d4deea;
-  transform: translateX(-50%);
-}
-
-.switch-link {
-  position: absolute;
-  top: 50%;
-  height: 3px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #f43f5e, #0ea5e9, #059669);
-  transform: translateY(-50%);
-  transition: opacity 160ms ease, width 220ms ease;
-}
-
-.switch-dot {
-  position: absolute;
-  top: 50%;
+  left: 50%;
   width: 10px;
   height: 10px;
   border-radius: 999px;
-  transform: translate(-50%, -50%);
-  transition: left 220ms ease, opacity 220ms ease;
+  transform: translateX(-50%);
+  transition: opacity 220ms ease;
 }
 
-.switch-dot.naive {
+.lane-dot.naive {
   background: #e11d48;
 }
 
-.switch-dot.ai {
+.lane-dot.ai {
   background: #059669;
 }
 
-.legend {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 0.72rem;
-  color: #435b78;
+.film-shift {
+  font-size: 1.1rem;
+  line-height: 1;
+  transition: opacity 220ms ease;
+}
+
+.film-shift.changed {
+  color: #0369a1;
+}
+
+.film-shift.same {
+  color: #64748b;
+}
+
+.film-level-values {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  text-align: center;
+  font-size: 0.69rem;
+  color: #61758f;
   font-weight: 700;
-}
-
-.legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.legend .pick {
-  position: static;
-  width: 8px;
-  height: 8px;
 }
 
 .kpi-row {
@@ -396,9 +341,19 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .switch-row {
+  .film-head,
+  .film-row,
+  .film-levels {
     grid-template-columns: 1fr;
-    gap: 5px;
+    gap: 4px;
+  }
+
+  .film-shift {
+    display: none;
+  }
+
+  .film-lane {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .kpi-row {
