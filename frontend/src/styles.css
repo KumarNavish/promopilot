@@ -134,14 +134,6 @@ h1 {
   gap: 8px;
 }
 
-.spotlight-guide {
-  margin: -2px 0 2px;
-  font-size: 0.74rem;
-  font-weight: 700;
-  color: #4b6684;
-  line-height: 1.4;
-}
-
 .spotlight-domain {
   font-size: 0.86rem;
   font-weight: 800;
@@ -255,69 +247,64 @@ h1 {
   display: grid;
   align-content: center;
   justify-items: center;
-  gap: 4px;
+  gap: 6px;
   text-align: center;
 }
 
-.delta-title {
-  margin: 0;
+.decision-swap {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.policy-chip {
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.policy-chip.current {
+  border: 1px solid #f1c5ce;
+  background: #fff1f4;
+  color: #a2223f;
+}
+
+.policy-chip.ai {
+  border: 1px solid #b9e8d7;
+  background: #ecfdf5;
+  color: #0d6a63;
+}
+
+.swap-arrow {
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #0b679f;
+}
+
+.delta-chips {
+  display: grid;
+  gap: 4px;
+}
+
+.delta-chip {
+  border-radius: 999px;
+  padding: 2px 8px;
   font-size: 0.66rem;
   font-weight: 800;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: #5a748f;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
-.delta-card strong {
-  font-family: "Manrope", sans-serif;
-  font-size: 0.94rem;
-  line-height: 1.2;
-  color: #123a61;
+.delta-chip.good {
+  background: #ecfdf5;
+  color: #0d6a63;
 }
 
-.delta-card strong.good {
-  color: var(--good);
-}
-
-.delta-card strong.bad {
-  color: var(--bad);
-}
-
-.delta-card small {
-  font-size: 0.71rem;
-  font-weight: 700;
-  line-height: 1.35;
-  color: #395b7c;
-}
-
-.delta-card small.good {
-  color: var(--good);
-}
-
-.delta-card small.bad {
-  color: var(--bad);
-}
-
-.delta-card em {
-  margin-top: 2px;
-  border: 1px solid #f4c8d1;
-  border-radius: 999px;
-  background: #fff4f6;
-  color: #a12341;
-  font-size: 0.62rem;
-  font-style: normal;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  padding: 2px 8px;
-}
-
-.delta-explainer {
-  margin: 1px 0 0;
-  font-size: 0.67rem;
-  font-weight: 700;
-  line-height: 1.35;
-  color: #4b6784;
+.delta-chip.bad {
+  background: #fff1f2;
+  color: #b42318;
 }
 
 .level-scale {
@@ -354,7 +341,38 @@ h1 {
 }
 
 .segment-tab.auto {
-  text-transform: uppercase;
+  text-transform: none;
+}
+
+.kpi-legend {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.kpi-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #49637f;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.legend-dot.current {
+  background: #9fb6cd;
+}
+
+.legend-dot.ai {
+  background: #0f766e;
 }
 
 .kpi-row {
@@ -388,6 +406,22 @@ h1 {
   color: #113a61;
 }
 
+.kpi-progress {
+  margin-top: 6px;
+  height: 8px;
+  border-radius: 999px;
+  background: #e7eef7;
+  overflow: hidden;
+}
+
+.kpi-progress i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0ea5e9, #0f766e);
+  transition: width 280ms ease;
+}
+
 .kpi-compare {
   margin-top: 5px;
   display: grid;
@@ -396,15 +430,9 @@ h1 {
 
 .kpi-compare-row {
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
-}
-
-.kpi-compare-row span {
-  font-size: 0.68rem;
-  font-weight: 700;
-  color: #4f647b;
 }
 
 .kpi-compare-row strong {
