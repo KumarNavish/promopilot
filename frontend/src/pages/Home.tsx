@@ -36,6 +36,9 @@ interface ImpactScore {
   incidentsAvoided: number;
   candidatesEvaluated: number;
   changedSegments: number;
+  incidentDeltaPct: number;
+  onCallDeltaPct: number;
+  riskDeltaPct: number;
   aiPolicy: PolicyMap;
   naivePolicy: PolicyMap;
   aiProjection: PolicyProjection;
@@ -67,12 +70,6 @@ function formatInteger(value: number): string {
   }).format(value);
 }
 
-function formatHours(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 1
-  }).format(value);
-}
-
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -81,12 +78,9 @@ function formatCurrency(value: number): string {
   }).format(value);
 }
 
-function formatSignedInteger(value: number): string {
-  return `${value >= 0 ? "+" : "-"}${formatInteger(Math.abs(value))}`;
-}
-
-function formatSignedCurrency(value: number): string {
-  return `${value >= 0 ? "+" : "-"}${formatCurrency(Math.abs(value))}`;
+function formatSignedPercent(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  return `${rounded >= 0 ? "+" : "-"}${Math.abs(rounded).toFixed(1)}%`;
 }
 
 function cleanSegment(segment: string): string {
@@ -113,6 +107,13 @@ function normalize(values: number[]): number[] {
   }
 
   return values.map((value) => (value - min) / (max - min));
+}
+
+function ratioPercent(after: number, before: number): number {
+  if (before <= 0) {
+    return 100;
+  }
+  return (after / before) * 100;
 }
 
 function optimizePolicy(response: RecommendResponse): PolicyMap {
@@ -388,6 +389,9 @@ export function Home(): JSX.Element {
     const aiOnCallHours = (aiIncidents * TRIAGE_MINUTES_PER_INCIDENT) / 60;
     const naiveRiskCost = naiveProjection.riskCostUsd;
     const aiRiskCost = aiProjection.riskCostUsd;
+    const incidentDeltaPct = naiveIncidents > 0 ? ((aiIncidents - naiveIncidents) / naiveIncidents) * 100 : 0;
+    const onCallDeltaPct = naiveOnCallHours > 0 ? ((aiOnCallHours - naiveOnCallHours) / naiveOnCallHours) * 100 : 0;
+    const riskDeltaPct = naiveRiskCost > 0 ? ((aiRiskCost - naiveRiskCost) / naiveRiskCost) * 100 : 0;
 
     return {
       policyLine: buildPolicyLine(aiPolicy),
@@ -395,6 +399,9 @@ export function Home(): JSX.Element {
       incidentsAvoided: naiveIncidents - aiIncidents,
       candidatesEvaluated,
       changedSegments,
+      incidentDeltaPct,
+      onCallDeltaPct,
+      riskDeltaPct,
       aiPolicy,
       naivePolicy,
       aiProjection,
@@ -435,6 +442,21 @@ export function Home(): JSX.Element {
   const animatedAiIncidents = useAnimatedNumber(score?.aiIncidents ?? 0, `incidents|${metricAnimationKey}`);
   const animatedAiOnCallHours = useAnimatedNumber(score?.aiOnCallHours ?? 0, `oncall|${metricAnimationKey}`);
   const animatedAiRiskCost = useAnimatedNumber(score?.aiRiskCost ?? 0, `risk|${metricAnimationKey}`);
+  const animatedIncidentDeltaPct = useAnimatedNumber(score?.incidentDeltaPct ?? 0, `incident-delta|${metricAnimationKey}`);
+  const animatedOnCallDeltaPct = useAnimatedNumber(score?.onCallDeltaPct ?? 0, `oncall-delta|${metricAnimationKey}`);
+  const animatedRiskDeltaPct = useAnimatedNumber(score?.riskDeltaPct ?? 0, `risk-delta|${metricAnimationKey}`);
+  const animatedIncidentRatio = useAnimatedNumber(
+    ratioPercent(score?.aiIncidents ?? 0, score?.naiveIncidents ?? 1),
+    `incident-ratio|${metricAnimationKey}`
+  );
+  const animatedOnCallRatio = useAnimatedNumber(
+    ratioPercent(score?.aiOnCallHours ?? 0, score?.naiveOnCallHours ?? 1),
+    `oncall-ratio|${metricAnimationKey}`
+  );
+  const animatedRiskRatio = useAnimatedNumber(
+    ratioPercent(score?.aiRiskCost ?? 0, score?.naiveRiskCost ?? 1),
+    `risk-ratio|${metricAnimationKey}`
+  );
 
   const activePhase = Math.min(PHASES.length - 1, Math.floor(frame / FRAMES_PER_PHASE));
   const phaseProgress = (frame % FRAMES_PER_PHASE) / Math.max(FRAMES_PER_PHASE - 1, 1);
@@ -448,24 +470,15 @@ export function Home(): JSX.Element {
   return (
     <main className="page-shell" data-testid="home-shell">
       <header className="hero">
-        <div>
-          <h1>Counterfactual Policy AI</h1>
-          <p className="single-story" data-testid="single-story">
-            logs -&gt; debias -&gt; search -&gt; ship
-          </p>
-        </div>
-        <div className="hero-tools">
-          {score ? <span className="meta-chip" data-testid="actions-chip">actions {score.candidatesEvaluated}</span> : null}
-          {score ? <span className="meta-chip" data-testid="changes-chip">changes {score.changedSegments}</span> : null}
-          <button
-            type="button"
-            className="text-button"
-            onClick={() => setReplayTick((prev) => prev + 1)}
-            data-testid="replay-simulation"
-          >
-            Replay
-          </button>
-        </div>
+        <h1>Counterfactual Policy AI</h1>
+        <button
+          type="button"
+          className="text-button"
+          onClick={() => setReplayTick((prev) => prev + 1)}
+          data-testid="replay-simulation"
+        >
+          Replay
+        </button>
       </header>
 
       {loading ? (
@@ -483,10 +496,6 @@ export function Home(): JSX.Element {
 
       {score && results.dr ? (
         <section className="result-panel" data-testid="results-block">
-          <p className="policy-strip" data-testid="policy-strip">
-            {score.policyLine}
-          </p>
-
           <div className="phase-strip" data-testid="phase-strip">
             {PHASES.map((phase, index) => (
               <span
@@ -548,26 +557,38 @@ export function Home(): JSX.Element {
 
           <div className="kpi-row">
             <article className="kpi-card" data-testid="kpi-incidents">
-              <p>Incidents / week</p>
-              <strong>{`${formatInteger(score.naiveIncidents)} -> ${formatInteger(animatedAiIncidents)}`}</strong>
+              <p>Incidents</p>
+              <strong>{formatSignedPercent(animatedIncidentDeltaPct)}</strong>
+              <div className="kpi-meter">
+                <span className="kpi-baseline" />
+                <span className="kpi-current" style={{ width: `${Math.min(130, Math.max(0, animatedIncidentRatio))}%` }} />
+              </div>
               <small className={animatedAiIncidents <= score.naiveIncidents ? "good" : "bad"}>
-                {formatSignedInteger(animatedAiIncidents - score.naiveIncidents)}
+                {`${formatInteger(score.naiveIncidents)} -> ${formatInteger(animatedAiIncidents)}`}
               </small>
             </article>
 
             <article className="kpi-card" data-testid="kpi-oncall">
-              <p>On-call h / week</p>
-              <strong>{`${formatHours(score.naiveOnCallHours)} -> ${formatHours(animatedAiOnCallHours)}`}</strong>
+              <p>On-call load</p>
+              <strong>{formatSignedPercent(animatedOnCallDeltaPct)}</strong>
+              <div className="kpi-meter">
+                <span className="kpi-baseline" />
+                <span className="kpi-current" style={{ width: `${Math.min(130, Math.max(0, animatedOnCallRatio))}%` }} />
+              </div>
               <small className={animatedAiOnCallHours <= score.naiveOnCallHours ? "good" : "bad"}>
-                {formatSignedInteger(animatedAiOnCallHours - score.naiveOnCallHours)}
+                {`${Math.round(score.naiveOnCallHours)}h -> ${Math.round(animatedAiOnCallHours)}h`}
               </small>
             </article>
 
             <article className="kpi-card" data-testid="kpi-risk-cost">
-              <p>Risk cost / week</p>
-              <strong>{`${formatCurrency(score.naiveRiskCost)} -> ${formatCurrency(animatedAiRiskCost)}`}</strong>
+              <p>Risk cost</p>
+              <strong>{formatSignedPercent(animatedRiskDeltaPct)}</strong>
+              <div className="kpi-meter">
+                <span className="kpi-baseline" />
+                <span className="kpi-current" style={{ width: `${Math.min(130, Math.max(0, animatedRiskRatio))}%` }} />
+              </div>
               <small className={animatedAiRiskCost <= score.naiveRiskCost ? "good" : "bad"}>
-                {formatSignedCurrency(animatedAiRiskCost - score.naiveRiskCost)}
+                {`${formatCurrency(score.naiveRiskCost)} -> ${formatCurrency(animatedAiRiskCost)}`}
               </small>
             </article>
           </div>
