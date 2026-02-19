@@ -68,6 +68,19 @@ function cleanSegment(segment: string): string {
   return segment.replace("Domain=", "").replace(/_/g, " ");
 }
 
+function policyLevelName(level: number): string {
+  if (level === 0) {
+    return "Conservative";
+  }
+  if (level === 1) {
+    return "Balanced";
+  }
+  if (level === 2) {
+    return "Growth";
+  }
+  return `Level ${level}`;
+}
+
 function objectiveValue(point: DoseResponsePoint): number {
   return point.successes_per_10k;
 }
@@ -217,7 +230,7 @@ function buildSegmentDecisions(params: {
 function buildPolicyLine(policy: PolicyMap): string {
   return Object.entries(policy)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([segment, level]) => `${cleanSegment(segment)}: level ${level}`)
+    .map(([segment, level]) => `${cleanSegment(segment)}: ${policyLevelName(level)} (level ${level})`)
     .join(" | ");
 }
 
@@ -436,6 +449,12 @@ export function Home(): JSX.Element {
   const animatedAiSuccess = useAnimatedNumber(score?.aiSuccessPer10k ?? 0, `ai-success|${metricAnimationKey}`);
   const animatedActiveSuccessGain = useAnimatedNumber(activeDecision?.successGainPer10k ?? 0, `row-success|${metricAnimationKey}`);
   const animatedActiveIncidentGain = useAnimatedNumber(activeDecision?.incidentsAvoidedPer10k ?? 0, `row-incidents|${metricAnimationKey}`);
+  const incidentScale = Math.max(score?.naiveIncidentPer10k ?? 0, score?.aiIncidentPer10k ?? 0, 1);
+  const successScale = Math.max(score?.naiveSuccessPer10k ?? 0, score?.aiSuccessPer10k ?? 0, 1);
+  const currentIncidentBar = ((score?.naiveIncidentPer10k ?? 0) / incidentScale) * 100;
+  const aiIncidentBar = (animatedAiIncidents / incidentScale) * 100;
+  const currentSuccessBar = ((score?.naiveSuccessPer10k ?? 0) / successScale) * 100;
+  const aiSuccessBar = (animatedAiSuccess / successScale) * 100;
 
   return (
     <main className="page-shell" data-testid="home-shell">
@@ -487,7 +506,10 @@ export function Home(): JSX.Element {
                 <p>Historical observed outcomes</p>
                 <div className="lane-bars naive">
                   {activeDecision.levels.map((level, index) => (
-                    <span key={`naive-${level}`} className="bar-cell">
+                    <span
+                      key={`naive-${level}`}
+                      className={`bar-cell ${activeDecision.naivePick === level ? "selected-current" : ""}`}
+                    >
                       <span
                         className="bar-fill naive"
                         style={{ height: `${24 + activeDecision.naiveNorm[index] * 66}%` }}
@@ -502,8 +524,8 @@ export function Home(): JSX.Element {
                 <p className="delta-title">AI decision update</p>
                 <strong>
                   {activeDecision.naivePick === activeDecision.aiPick
-                    ? `Keep policy level ${activeDecision.aiPick}`
-                    : `Change policy level ${activeDecision.naivePick} to level ${activeDecision.aiPick}`}
+                    ? `Keep ${policyLevelName(activeDecision.aiPick)} policy`
+                    : `Change from ${policyLevelName(activeDecision.naivePick)} to ${policyLevelName(activeDecision.aiPick)}`}
                 </strong>
                 <small className={animatedActiveIncidentGain >= 0 ? "good" : "bad"}>
                   {`${formatSignedNumber(animatedActiveSuccessGain)} successful outcomes and ${formatIncidentNarrative(animatedActiveIncidentGain)} per 10k requests`}
@@ -513,13 +535,21 @@ export function Home(): JSX.Element {
                     historical bias corrected
                   </em>
                 ) : null}
+                <p className="delta-explainer">
+                  {activeDecision.naivePick === activeDecision.aiPick
+                    ? "After bias adjustment, the same policy remains best for this segment."
+                    : "After bias adjustment, a different policy level gives better safety and success together."}
+                </p>
               </article>
 
               <article className="lane-card" data-testid="lane-corrected">
                 <p>AI bias-adjusted outcomes</p>
                 <div className="lane-bars ai" style={{ opacity: 0.62 + activeProgress * 0.38 }}>
                   {activeDecision.levels.map((level, index) => (
-                    <span key={`ai-${level}`} className="bar-cell">
+                    <span
+                      key={`ai-${level}`}
+                      className={`bar-cell ${activeDecision.aiPick === level ? "selected-ai" : ""}`}
+                    >
                       <span
                         className="bar-fill ai"
                         style={{ height: `${24 + activeDecision.drNorm[index] * 66}%` }}
@@ -533,7 +563,7 @@ export function Home(): JSX.Element {
 
             <div className="level-scale" data-testid="level-scale">
               {activeDecision.levels.map((level) => (
-                <span key={`scale-${level}`}>{`Policy level ${level}`}</span>
+                <span key={`scale-${level}`}>{`${policyLevelName(level)} (level ${level})`}</span>
               ))}
             </div>
 
@@ -569,7 +599,22 @@ export function Home(): JSX.Element {
 
             <article className="kpi-card" data-testid="kpi-incidents">
               <p>Incidents per 10k requests</p>
-              <strong>{`${formatInteger(score.naiveIncidentPer10k)} -> ${formatInteger(animatedAiIncidents)}`}</strong>
+              <div className="kpi-compare">
+                <div className="kpi-compare-row">
+                  <span>Current</span>
+                  <div className="kpi-track">
+                    <i className="current" style={{ width: `${currentIncidentBar}%` }} />
+                  </div>
+                  <strong>{formatInteger(score.naiveIncidentPer10k)}</strong>
+                </div>
+                <div className="kpi-compare-row">
+                  <span>AI</span>
+                  <div className="kpi-track">
+                    <i className="ai" style={{ width: `${aiIncidentBar}%` }} />
+                  </div>
+                  <strong>{formatInteger(animatedAiIncidents)}</strong>
+                </div>
+              </div>
               <small className={animatedIncidentsAvoided >= 0 ? "good" : "bad"}>
                 {formatIncidentNarrative(animatedIncidentsAvoided)}
               </small>
@@ -577,7 +622,22 @@ export function Home(): JSX.Element {
 
             <article className="kpi-card" data-testid="kpi-success">
               <p>Successful outcomes per 10k requests</p>
-              <strong>{`${formatInteger(score.naiveSuccessPer10k)} -> ${formatInteger(animatedAiSuccess)}`}</strong>
+              <div className="kpi-compare">
+                <div className="kpi-compare-row">
+                  <span>Current</span>
+                  <div className="kpi-track">
+                    <i className="current" style={{ width: `${currentSuccessBar}%` }} />
+                  </div>
+                  <strong>{formatInteger(score.naiveSuccessPer10k)}</strong>
+                </div>
+                <div className="kpi-compare-row">
+                  <span>AI</span>
+                  <div className="kpi-track">
+                    <i className="ai" style={{ width: `${aiSuccessBar}%` }} />
+                  </div>
+                  <strong>{formatInteger(animatedAiSuccess)}</strong>
+                </div>
+              </div>
               <small className={animatedSuccessGain >= 0 ? "good" : "bad"}>
                 {`${formatSignedNumber(animatedSuccessGain)} vs current policy`}
               </small>
