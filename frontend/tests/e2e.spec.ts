@@ -10,6 +10,7 @@ test("auto demo run is minimal, interactive, and value-forward", async ({ page }
 
   await expect(page.getByTestId("results-block")).toBeVisible();
   await expect(page.getByTestId("recommendation-line")).toContainText("Apply now:");
+  await expect(page.getByTestId("usefulness-line")).toContainText("on-call hours");
   await expect(page.getByTestId("impact-strip")).toBeVisible();
   await expect(page.getByText("AI run (auto)")).toBeVisible();
 

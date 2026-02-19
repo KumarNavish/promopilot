@@ -105,6 +105,17 @@ h1 {
   line-height: 1.45;
 }
 
+.usefulness-line {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid #cce8db;
+  background: #f2fbf6;
+  color: #0f5132;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 .impact-strip {
   border: 1px solid #d6e6f6;
   border-radius: 12px;
@@ -269,6 +280,14 @@ h1 {
   font-family: "Manrope", sans-serif;
   font-size: 1.3rem;
   color: var(--accent-strong);
+}
+
+.kpi-card small {
+  display: block;
+  margin-top: 4px;
+  color: #516277;
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 
 .button-primary {

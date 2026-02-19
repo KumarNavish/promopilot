@@ -30,11 +30,15 @@ type PolicyMap = Record<string, number>;
 
 interface ImpactScore {
   recommendationLine: string;
+  usefulnessLine: string;
   successLift: number;
   incidentsAvoided: number;
+  onCallHoursReturned: number;
   riskCostImpactUsd: number;
   changedSegments: number;
   candidatesEvaluated: number;
+  baselineIncidents: number;
+  aiIncidents: number;
   aiPolicy: PolicyMap;
   naivePolicy: PolicyMap;
   aiProjection: PolicyProjection;
@@ -52,6 +56,7 @@ const TIMELINE_TOTAL_MINUTES = 12;
 const TIMELINE_TICK_MS = 420;
 const SURGE_MULTIPLIER = 40;
 const AI_STEPS = ["Reweight logs", "Estimate outcomes", "Search actions", "Ship policy"] as const;
+const TRIAGE_MINUTES_PER_INCIDENT = 8;
 
 function formatInteger(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -340,14 +345,29 @@ export function Home(): JSX.Element {
       (count, segment) => count + segment.points.filter((point) => point.policy_level <= MAX_POLICY_LEVEL).length,
       0
     );
+    const onCallHoursReturned = (incidentsAvoided * TRIAGE_MINUTES_PER_INCIDENT) / 60;
+    const baselineIncidents = naiveProjection.incidents;
+    const aiIncidents = aiProjection.incidents;
+    const usefulnessLine =
+      incidentsAvoided >= 0
+        ? `${formatInteger(incidentsAvoided)} fewer incidents and ${formatInteger(
+            onCallHoursReturned
+          )} on-call hours returned per week (at ${formatInteger(WEEKLY_REQUESTS)} requests/week).`
+        : `${formatInteger(Math.abs(incidentsAvoided))} additional incidents and ${formatInteger(
+            Math.abs(onCallHoursReturned)
+          )} on-call hours lost per week.`;
 
     return {
-      recommendationLine: `Apply now: ${actionSummary.text}.`,
+      recommendationLine: `Apply now: ${actionSummary.text}. Incidents/week ${formatInteger(baselineIncidents)} -> ${formatInteger(aiIncidents)}.`,
+      usefulnessLine,
       successLift,
       incidentsAvoided,
+      onCallHoursReturned,
       riskCostImpactUsd,
       changedSegments: actionSummary.changedCount,
       candidatesEvaluated,
+      baselineIncidents,
+      aiIncidents,
       aiPolicy,
       naivePolicy,
       aiProjection,
@@ -426,7 +446,8 @@ export function Home(): JSX.Element {
   const metricAnimationKey = `${results.dr?.artifact_version ?? "none"}|${replayTick}`;
   const queueAnimationKey = `${metricAnimationKey}|${timelineMinute}`;
   const animatedSuccessLift = useAnimatedNumber(score?.successLift ?? 0, `kpi-success|${metricAnimationKey}`);
-  const animatedIncidentsAvoided = useAnimatedNumber(score?.incidentsAvoided ?? 0, `kpi-incidents|${metricAnimationKey}`);
+  const animatedAiIncidents = useAnimatedNumber(score?.aiIncidents ?? 0, `kpi-incidents|${metricAnimationKey}`);
+  const animatedOnCallHours = useAnimatedNumber(score?.onCallHoursReturned ?? 0, `kpi-oncall|${metricAnimationKey}`);
   const animatedRiskCost = useAnimatedNumber(score?.riskCostImpactUsd ?? 0, `kpi-risk|${metricAnimationKey}`);
   const currentNaiveQueue = queueTimeline ? queueTimeline.naiveQueue[timelineMinute] : 0;
   const currentAiQueue = queueTimeline ? queueTimeline.aiQueue[timelineMinute] : 0;
@@ -464,6 +485,9 @@ export function Home(): JSX.Element {
         <section className="result-panel" data-testid="results-block">
           <p className="recommendation-line" data-testid="recommendation-line">
             {score.recommendationLine}
+          </p>
+          <p className="usefulness-line" data-testid="usefulness-line">
+            {score.usefulnessLine}
           </p>
 
           <section className="impact-strip" data-testid="impact-strip">
@@ -546,13 +570,15 @@ export function Home(): JSX.Element {
             </article>
 
             <article className="kpi-card" data-testid="kpi-incidents">
-              <p>Incidents avoided</p>
-              <strong>{formatSignedInteger(animatedIncidentsAvoided)}</strong>
+              <p>Incidents / week</p>
+              <strong>{formatInteger(animatedAiIncidents)}</strong>
+              <small>{`was ${formatInteger(score.baselineIncidents)}`}</small>
             </article>
 
             <article className="kpi-card" data-testid="kpi-risk-cost">
-              <p>Risk cost saved</p>
-              <strong>{formatSignedCurrency(animatedRiskCost)}</strong>
+              <p>On-call hours + cost / week</p>
+              <strong>{formatSignedInteger(animatedOnCallHours)}</strong>
+              <small>{formatSignedCurrency(animatedRiskCost)}</small>
             </article>
           </div>
 
