@@ -11,24 +11,20 @@ interface MethodRollup {
   incidents: number;
 }
 
-interface SegmentVisual {
+interface SegmentDecision {
   segment: string;
-  levels: number[];
-  naiveUtilities: number[];
-  drUtilities: number[];
-  biasGap: number[];
-  biasNorm: number[];
-  naiveNorm: number[];
-  drNorm: number[];
   naivePick: number;
   aiPick: number;
+  biasAtNaive: number;
+  utilityGain: number;
+  incidentsAvoidedPer10k: number;
+  successGainPer10k: number;
 }
 
 type PolicyMap = Record<string, number>;
 
 interface ImpactScore {
   policyLine: string;
-  candidatesEvaluated: number;
   changedSegments: number;
   totalSegments: number;
   changeSharePct: number;
@@ -40,27 +36,21 @@ interface ImpactScore {
   aiIncidentPer10k: number;
   naiveSuccessPer10k: number;
   aiSuccessPer10k: number;
-  segmentVisuals: SegmentVisual[];
+  decisionRows: SegmentDecision[];
+  maxAbsUtilityGain: number;
 }
 
 const DEMO_SEGMENT_BY: SegmentBy = "task_domain";
 const OBJECTIVE = "task_success" as const;
 const MAX_POLICY_LEVEL = 2;
 const INCIDENT_PENALTY = 4;
-const PHASES = ["Logs", "Debias", "Search", "Ship"] as const;
-const FRAMES_PER_PHASE = 18;
-const TOTAL_FRAMES = PHASES.length * FRAMES_PER_PHASE - 1;
-const FRAME_TICK_MS = 180;
+const FRAMES_PER_ROW = 20;
+const FRAME_TICK_MS = 120;
 
 function formatInteger(value: number): string {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0
   }).format(value);
-}
-
-function formatSignedPercent(value: number): string {
-  const rounded = Math.round(value * 10) / 10;
-  return `${rounded >= 0 ? "+" : "-"}${Math.abs(rounded).toFixed(1)}%`;
 }
 
 function formatSignedNumber(value: number): string {
@@ -79,25 +69,8 @@ function utility(point: DoseResponsePoint): number {
   return objectiveValue(point) - INCIDENT_PENALTY * point.incidents_per_10k;
 }
 
-function normalize(values: number[]): number[] {
-  if (values.length === 0) {
-    return values;
-  }
-
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  if (Math.abs(max - min) < 1e-9) {
-    return values.map(() => 0.5);
-  }
-
-  return values.map((value) => (value - min) / (max - min));
-}
-
-function ratioPercent(after: number, before: number): number {
-  if (before <= 0) {
-    return 100;
-  }
-  return (after / before) * 100;
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function optimizePolicy(response: RecommendResponse): PolicyMap {
@@ -149,12 +122,12 @@ function evaluatePolicy(response: RecommendResponse, policy: PolicyMap): MethodR
   };
 }
 
-function buildSegmentVisuals(params: {
+function buildSegmentDecisions(params: {
   naive: RecommendResponse;
   dr: RecommendResponse;
   naivePolicy: PolicyMap;
   aiPolicy: PolicyMap;
-}): SegmentVisual[] {
+}): SegmentDecision[] {
   const { naive, dr, naivePolicy, aiPolicy } = params;
 
   const naiveLookup = new Map<string, Map<number, DoseResponsePoint>>();
@@ -165,7 +138,8 @@ function buildSegmentVisuals(params: {
     );
   }
 
-  const visuals: SegmentVisual[] = [];
+  const rows: SegmentDecision[] = [];
+
   for (const segment of dr.dose_response) {
     const drPoints = segment.points
       .filter((point) => point.policy_level <= MAX_POLICY_LEVEL)
@@ -175,35 +149,32 @@ function buildSegmentVisuals(params: {
       continue;
     }
 
-    const levels = drPoints.map((point) => point.policy_level);
+    const drByLevel = new Map(drPoints.map((point) => [point.policy_level, point]));
     const naiveByLevel = naiveLookup.get(segment.segment);
 
-    const naiveUtilities = levels.map((level, index) => {
-      const fallbackPoint = drPoints[index];
-      const point = naiveByLevel?.get(level) ?? fallbackPoint;
-      return utility(point);
-    });
+    const naivePick = naivePolicy[segment.segment] ?? drPoints[0].policy_level;
+    const aiPick = aiPolicy[segment.segment] ?? drPoints[0].policy_level;
 
-    const drUtilities = drPoints.map((point) => utility(point));
-    const biasGap = levels.map((_, index) => naiveUtilities[index] - drUtilities[index]);
-    const biasAbsMax = Math.max(...biasGap.map((value) => Math.abs(value)), 1e-9);
-    const biasNorm = biasGap.map((value) => Math.abs(value) / biasAbsMax);
+    const drNaivePoint = drByLevel.get(naivePick) ?? drPoints[0];
+    const drAiPoint = drByLevel.get(aiPick) ?? drPoints[0];
+    const naiveObservedPoint = naiveByLevel?.get(naivePick) ?? drNaivePoint;
 
-    visuals.push({
+    const naiveObservedUtility = utility(naiveObservedPoint);
+    const naiveCorrectedUtility = utility(drNaivePoint);
+    const aiCorrectedUtility = utility(drAiPoint);
+
+    rows.push({
       segment: segment.segment,
-      levels,
-      naiveUtilities,
-      drUtilities,
-      biasGap,
-      biasNorm,
-      naiveNorm: normalize(naiveUtilities),
-      drNorm: normalize(drUtilities),
-      naivePick: naivePolicy[segment.segment] ?? levels[0],
-      aiPick: aiPolicy[segment.segment] ?? levels[0]
+      naivePick,
+      aiPick,
+      biasAtNaive: naiveObservedUtility - naiveCorrectedUtility,
+      utilityGain: aiCorrectedUtility - naiveCorrectedUtility,
+      incidentsAvoidedPer10k: drNaivePoint.incidents_per_10k - drAiPoint.incidents_per_10k,
+      successGainPer10k: drAiPoint.successes_per_10k - drNaivePoint.successes_per_10k
     });
   }
 
-  return visuals.sort((a, b) => a.segment.localeCompare(b.segment));
+  return rows.sort((a, b) => a.segment.localeCompare(b.segment));
 }
 
 function buildPolicyLine(policy: PolicyMap): string {
@@ -348,27 +319,32 @@ export function Home(): JSX.Element {
     const naiveEvalByDr = evaluatePolicy(results.dr, naivePolicy);
     const aiEvalByDr = evaluatePolicy(results.dr, aiPolicy);
 
-    const segmentVisuals = buildSegmentVisuals({
+    const decisionRows = buildSegmentDecisions({
       naive: results.naive,
       dr: results.dr,
       naivePolicy,
       aiPolicy
     });
 
-    const candidatesEvaluated = segmentVisuals.reduce((count, row) => count + row.levels.length, 0);
-    const totalSegments = segmentVisuals.length;
-    const changedSegments = segmentVisuals.filter((row) => row.naivePick !== row.aiPick).length;
+    const totalSegments = decisionRows.length;
+    const changedSegments = decisionRows.filter((row) => row.naivePick !== row.aiPick).length;
+    const changeSharePct = totalSegments > 0 ? (changedSegments / totalSegments) * 100 : 0;
+
     const naiveIncidentPer10k = naiveEvalByDr.incidents;
     const aiIncidentPer10k = aiEvalByDr.incidents;
     const naiveSuccessPer10k = naiveEvalByDr.successes;
     const aiSuccessPer10k = aiEvalByDr.successes;
+
     const incidentsAvoidedPer10k = naiveIncidentPer10k - aiIncidentPer10k;
     const successGainPer10k = aiSuccessPer10k - naiveSuccessPer10k;
-    const changeSharePct = totalSegments > 0 ? (changedSegments / totalSegments) * 100 : 0;
+
+    const maxAbsUtilityGain = Math.max(
+      ...decisionRows.map((row) => Math.abs(row.utilityGain)),
+      1e-9
+    );
 
     return {
       policyLine: buildPolicyLine(aiPolicy),
-      candidatesEvaluated,
       changedSegments,
       totalSegments,
       changeSharePct,
@@ -380,7 +356,8 @@ export function Home(): JSX.Element {
       aiIncidentPer10k,
       naiveSuccessPer10k,
       aiSuccessPer10k,
-      segmentVisuals
+      decisionRows,
+      maxAbsUtilityGain
     };
   }, [results.dr, results.naive]);
 
@@ -391,9 +368,11 @@ export function Home(): JSX.Element {
     }
 
     setFrame(0);
+    const totalFrames = score.decisionRows.length * FRAMES_PER_ROW + FRAMES_PER_ROW;
+
     const intervalId = window.setInterval(() => {
       setFrame((current) => {
-        if (current >= TOTAL_FRAMES) {
+        if (current >= totalFrames) {
           window.clearInterval(intervalId);
           return current;
         }
@@ -406,34 +385,38 @@ export function Home(): JSX.Element {
     };
   }, [score, replayTick]);
 
+  const storyLine = useMemo(() => {
+    if (!score) {
+      return "AI is replaying logged decisions and searching for the highest-utility policy.";
+    }
+
+    const successCount = formatInteger(Math.round(Math.abs(score.successGainPer10k)));
+    const incidentCount = formatInteger(Math.round(Math.abs(score.incidentsAvoidedPer10k)));
+    const successDirection = score.successGainPer10k >= 0 ? "more successful outcomes" : "fewer successful outcomes";
+    const incidentDirection = score.incidentsAvoidedPer10k >= 0 ? "fewer incidents" : "more incidents";
+
+    if (score.changedSegments > 0) {
+      return `AI corrected ${score.changedSegments} biased decision and delivered ${successCount} ${successDirection} with ${incidentCount} ${incidentDirection} per 10k requests.`;
+    }
+
+    return `AI validated the current policy and estimates ${successCount} ${successDirection} with ${incidentCount} ${incidentDirection} per 10k requests.`;
+  }, [score]);
+
   const metricAnimationKey = `${results.dr?.artifact_version ?? "none"}|${replayTick}`;
-  const animatedAiIncidents = useAnimatedNumber(score?.aiIncidentPer10k ?? 0, `incidents|${metricAnimationKey}`);
-  const animatedAiSuccess = useAnimatedNumber(score?.aiSuccessPer10k ?? 0, `success|${metricAnimationKey}`);
   const animatedChangedSegments = useAnimatedNumber(score?.changedSegments ?? 0, `changes|${metricAnimationKey}`);
+  const animatedChangeSharePct = useAnimatedNumber(score?.changeSharePct ?? 0, `change-share|${metricAnimationKey}`);
   const animatedIncidentsAvoided = useAnimatedNumber(score?.incidentsAvoidedPer10k ?? 0, `incidents-avoided|${metricAnimationKey}`);
   const animatedSuccessGain = useAnimatedNumber(score?.successGainPer10k ?? 0, `success-gain|${metricAnimationKey}`);
-  const animatedChangeSharePct = useAnimatedNumber(score?.changeSharePct ?? 0, `change-share|${metricAnimationKey}`);
-  const animatedIncidentRatio = useAnimatedNumber(
-    ratioPercent(score?.aiIncidentPer10k ?? 0, score?.naiveIncidentPer10k ?? 1),
-    `incident-ratio|${metricAnimationKey}`
-  );
-  const animatedSuccessRatio = useAnimatedNumber(
-    ratioPercent(score?.aiSuccessPer10k ?? 0, score?.naiveSuccessPer10k ?? 1),
-    `success-ratio|${metricAnimationKey}`
-  );
-
-  const activePhase = Math.min(PHASES.length - 1, Math.floor(frame / FRAMES_PER_PHASE));
-  const phaseProgress = (frame % FRAMES_PER_PHASE) / Math.max(FRAMES_PER_PHASE - 1, 1);
-  const displayLevels = score?.segmentVisuals[0]?.levels ?? [0, 1, 2];
-  const naiveLaneOpacity = activePhase < 2 ? 1 : 0.52;
-  const aiLaneOpacity = activePhase === 0 ? 0.26 : activePhase === 1 ? 0.26 + phaseProgress * 0.34 : 1;
-  const aiPickOpacity = activePhase < 2 ? 0 : activePhase === 2 ? phaseProgress : 1;
-  const shiftOpacity = activePhase < 2 ? 0 : activePhase === 2 ? phaseProgress : 1;
+  const animatedAiIncidents = useAnimatedNumber(score?.aiIncidentPer10k ?? 0, `ai-incidents|${metricAnimationKey}`);
+  const animatedAiSuccess = useAnimatedNumber(score?.aiSuccessPer10k ?? 0, `ai-success|${metricAnimationKey}`);
 
   return (
     <main className="page-shell" data-testid="home-shell">
       <header className="hero">
-        <h1>Counterfactual Policy AI</h1>
+        <div className="hero-copy">
+          <h1>Counterfactual Policy AI</h1>
+          <p className="hero-story" data-testid="hero-story">{storyLine}</p>
+        </div>
         <button
           type="button"
           className="text-button"
@@ -463,131 +446,65 @@ export function Home(): JSX.Element {
             <span>Ship now:</span> {score.policyLine}
           </p>
 
-          <div className="phase-strip" data-testid="phase-strip">
-            {PHASES.map((phase, index) => (
-              <span
-                key={phase}
-                className={`phase-pill ${index <= activePhase ? "active" : ""} ${index === activePhase ? "current" : ""}`}
-                data-testid={`phase-${index}`}
-              >
-                {phase}
-              </span>
-            ))}
-          </div>
-
-          <div className="visual-key" data-testid="visual-key">
-            <span><i className="key-token bias" />bias</span>
-            <span><i className="key-token bar-naive" />observed</span>
-            <span><i className="key-token bar-ai" />corrected</span>
-            <span><i className="key-token status-wrong">x</i>wrong pick</span>
-            <span><i className="key-token status-right">v</i>shipped</span>
-          </div>
-
-          <section className="decision-film" data-testid="decision-film">
-            <div className="film-head">
+          <section className="decision-strip" data-testid="decision-strip">
+            <div className="strip-head">
+              <span>Segment</span>
+              <span>Observed</span>
               <span />
-              <span className="film-col">Observed (biased logs)</span>
-              <span className="film-col" />
-              <span className="film-col">AI corrected estimate</span>
+              <span>AI</span>
+              <span>Measured delta / 10k</span>
             </div>
-            <p className="film-note">bar height = utility (success - 4 x incidents)</p>
 
-            {score.segmentVisuals.map((row) => {
-              const naivePickIndex = row.levels.indexOf(row.naivePick);
-              const aiPickIndex = row.levels.indexOf(row.aiPick);
-              const biasAtNaive = naivePickIndex >= 0 ? row.biasNorm[naivePickIndex] : 0;
-              const drift = aiPickIndex - naivePickIndex;
-              const driftArrow = drift === 0 ? "→" : drift > 0 ? "↗" : "↘";
+            {score.decisionRows.map((row, index) => {
+              const rowProgress = clamp((frame - index * FRAMES_PER_ROW) / FRAMES_PER_ROW, 0, 1);
+              const changed = row.naivePick !== row.aiPick;
+              const utilityWidth = clamp((Math.abs(row.utilityGain) / score.maxAbsUtilityGain) * 100, 8, 100) * rowProgress;
+              const incidentAbs = formatInteger(Math.round(Math.abs(row.incidentsAvoidedPer10k)));
+              const incidentToken = `${row.incidentsAvoidedPer10k >= 0 ? "-" : "+"}${incidentAbs} incidents`;
 
               return (
-                <div key={`film-${row.segment}`} className="film-row">
-                  <span className="film-label">{cleanSegment(row.segment)}</span>
-
-                  <div className="film-lane naive" style={{ opacity: naiveLaneOpacity }}>
-                    {row.levels.map((level, index) => (
-                      <span key={`${row.segment}-naive-${level}`} className="lane-cell">
-                        <span
-                          className="lane-fill naive"
-                          style={{ height: `${22 + row.naiveNorm[index] * 70}%` }}
-                        />
-                        <span
-                          className="lane-bias"
-                          style={{ opacity: row.biasNorm[index] * (activePhase < 1 ? 0 : 0.85) }}
-                        />
-                        {row.naivePick === level ? (
-                          <span
-                            className="lane-dot naive"
-                            style={{
-                              boxShadow: `0 0 0 ${2 + biasAtNaive * 6}px rgba(225, 29, 72, ${0.16 + biasAtNaive * 0.42})`
-                            }}
-                          />
-                        ) : null}
-                        {row.naivePick === level && row.naivePick !== row.aiPick ? (
-                          <span className="lane-status wrong">x</span>
-                        ) : null}
-                      </span>
-                    ))}
-                  </div>
-
-                  <span className={`film-shift ${drift === 0 ? "same" : "changed"}`} style={{ opacity: shiftOpacity }}>
-                    {driftArrow}
+                <article
+                  key={`decision-${row.segment}`}
+                  className={`decision-row ${changed ? "changed" : "same"}`}
+                  style={{
+                    opacity: 0.34 + rowProgress * 0.66,
+                    transform: `translateY(${(1 - rowProgress) * 8}px)`
+                  }}
+                  data-testid={`decision-row-${index}`}
+                >
+                  <span className="segment-name">{cleanSegment(row.segment)}</span>
+                  <span className={`pick-pill naive ${changed ? "flagged" : "stable"}`}>{`L${row.naivePick}`}</span>
+                  <span className={`decision-arrow ${changed ? "changed" : "same"}`}>{changed ? "→" : "="}</span>
+                  <span className={`pick-pill ai ${changed ? "lifted" : "stable"}`}>{`L${row.aiPick}`}</span>
+                  <span className="impact-cell">
+                    <span className={`impact-text ${row.utilityGain >= 0 ? "good" : "bad"}`}>
+                      {`${formatSignedNumber(row.successGainPer10k)} success | ${incidentToken}`}
+                    </span>
+                    <span className="impact-meter">
+                      <i className={row.utilityGain >= 0 ? "good" : "bad"} style={{ width: `${utilityWidth}%` }} />
+                    </span>
                   </span>
-
-                  <div className="film-lane ai" style={{ opacity: aiLaneOpacity }}>
-                    {row.levels.map((level, index) => (
-                      <span key={`${row.segment}-ai-${level}`} className="lane-cell">
-                        <span
-                          className="lane-fill ai"
-                          style={{ height: `${22 + row.drNorm[index] * 70}%` }}
-                        />
-                        {row.aiPick === level ? <span className="lane-dot ai" style={{ opacity: aiPickOpacity }} /> : null}
-                        {row.aiPick === level ? <span className="lane-status right" style={{ opacity: aiPickOpacity }}>v</span> : null}
-                      </span>
-                    ))}
-                  </div>
-                </div>
+                  {changed ? (
+                    <span className="bias-flag" title={`Observed logs overstated this pick by ${formatSignedNumber(row.biasAtNaive)} utility`}>
+                      bias corrected
+                    </span>
+                  ) : null}
+                </article>
               );
             })}
-
-            <div className="film-levels">
-              <span />
-              <div className="film-level-values">
-                {displayLevels.map((level) => (
-                  <span key={`lvl-left-${level}`}>{`L${level}`}</span>
-                ))}
-              </div>
-              <span />
-              <div className="film-level-values">
-                {displayLevels.map((level) => (
-                  <span key={`lvl-right-${level}`}>{`L${level}`}</span>
-                ))}
-              </div>
-            </div>
           </section>
-
-          <p className="kpi-source">Bottom numbers are computed from selected bars above.</p>
 
           <div className="kpi-row">
             <article className="kpi-card" data-testid="kpi-changes">
-              <p>Wrong picks fixed</p>
+              <p>Policies corrected</p>
               <strong>{`${Math.round(animatedChangedSegments)} / ${score.totalSegments}`}</strong>
-              <div className="kpi-meter">
-                <span className="kpi-baseline" />
-                <span className="kpi-current" style={{ width: `${Math.min(100, Math.max(0, animatedChangeSharePct))}%` }} />
-              </div>
-              <small className={score.changedSegments > 0 ? "good" : "bad"}>
-                {`${formatSignedPercent(animatedChangeSharePct)} of segments switched`}
-              </small>
+              <small className={score.changedSegments > 0 ? "good" : "bad"}>{`${Math.round(animatedChangeSharePct)}% switched`}</small>
             </article>
 
             <article className="kpi-card" data-testid="kpi-incidents">
               <p>Incidents avoided / 10k</p>
-              <strong>{formatSignedNumber(animatedIncidentsAvoided)}</strong>
-              <div className="kpi-meter">
-                <span className="kpi-baseline" />
-                <span className="kpi-current" style={{ width: `${Math.min(130, Math.max(0, animatedIncidentRatio))}%` }} />
-              </div>
-              <small className={animatedAiIncidents <= score.naiveIncidentPer10k ? "good" : "bad"}>
+              <strong>{`${formatInteger(Math.round(Math.abs(animatedIncidentsAvoided)))} ${animatedIncidentsAvoided >= 0 ? "fewer" : "more"}`}</strong>
+              <small className={animatedIncidentsAvoided >= 0 ? "good" : "bad"}>
                 {`${formatInteger(score.naiveIncidentPer10k)} -> ${formatInteger(animatedAiIncidents)}`}
               </small>
             </article>
@@ -595,11 +512,7 @@ export function Home(): JSX.Element {
             <article className="kpi-card" data-testid="kpi-success">
               <p>Success gain / 10k</p>
               <strong>{formatSignedNumber(animatedSuccessGain)}</strong>
-              <div className="kpi-meter">
-                <span className="kpi-baseline" />
-                <span className="kpi-current" style={{ width: `${Math.min(130, Math.max(0, animatedSuccessRatio))}%` }} />
-              </div>
-              <small className={animatedAiSuccess >= score.naiveSuccessPer10k ? "good" : "bad"}>
+              <small className={animatedSuccessGain >= 0 ? "good" : "bad"}>
                 {`${formatInteger(score.naiveSuccessPer10k)} -> ${formatInteger(animatedAiSuccess)}`}
               </small>
             </article>
