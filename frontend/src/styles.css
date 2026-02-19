@@ -124,9 +124,9 @@ h1 {
 .timeline-headline,
 .timeline-minute {
   margin: 0;
-  font-size: 0.84rem;
+  font-size: 0.82rem;
   font-weight: 700;
-  color: #0b4f60;
+  color: #1e3a5f;
 }
 
 .timeline-actions {
@@ -144,6 +144,30 @@ h1 {
   font-size: 0.76rem;
   font-weight: 700;
   cursor: pointer;
+}
+
+.step-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.step-pill {
+  border: 1px solid #d4e4f4;
+  border-radius: 999px;
+  padding: 5px 8px;
+  text-align: center;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #5a6f86;
+  background: #ffffff;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.step-pill.active {
+  border-color: #9ac7ea;
+  color: #0a4f80;
+  background: #eaf6ff;
 }
 
 .timeline-rows {
@@ -213,15 +237,10 @@ h1 {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.24);
 }
 
-input[type="range"] {
-  width: 100%;
-  accent-color: var(--accent);
-}
-
 .slo-line {
   margin: 0;
   color: #1e3a5f;
-  font-size: 0.77rem;
+  font-size: 0.8rem;
   font-weight: 700;
 }
 
@@ -267,6 +286,10 @@ input[type="range"] {
   .impact-strip-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .step-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .timeline-row,

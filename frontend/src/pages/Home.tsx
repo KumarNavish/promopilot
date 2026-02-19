@@ -33,6 +33,8 @@ interface ImpactScore {
   successLift: number;
   incidentsAvoided: number;
   riskCostImpactUsd: number;
+  changedSegments: number;
+  candidatesEvaluated: number;
   aiPolicy: PolicyMap;
   naivePolicy: PolicyMap;
   aiProjection: PolicyProjection;
@@ -49,6 +51,7 @@ const MINUTES_PER_WEEK = 7 * 24 * 60;
 const TIMELINE_TOTAL_MINUTES = 12;
 const TIMELINE_TICK_MS = 420;
 const SURGE_MULTIPLIER = 40;
+const AI_STEPS = ["Reweight logs", "Estimate outcomes", "Search actions", "Ship policy"] as const;
 
 function formatInteger(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -130,17 +133,21 @@ function evaluatePolicy(response: RecommendResponse, policy: PolicyMap): MethodR
   };
 }
 
-function buildChangeSummary(naivePolicy: PolicyMap, aiPolicy: PolicyMap): string {
+function buildActionSummary(naivePolicy: PolicyMap, aiPolicy: PolicyMap): { text: string; changedCount: number } {
   const changes = Object.keys(aiPolicy)
     .sort((a, b) => a.localeCompare(b))
     .filter((segment) => naivePolicy[segment] !== aiPolicy[segment]);
 
   if (changes.length === 0) {
-    return "0 segment changes";
+    return { text: "No policy level changes", changedCount: 0 };
   }
 
-  const segment = changes[0];
-  return `${changes.length} segment changes (e.g., ${cleanSegment(segment)} L${naivePolicy[segment]} -> L${aiPolicy[segment]})`;
+  const preview = changes
+    .slice(0, 2)
+    .map((segment) => `${cleanSegment(segment)} L${naivePolicy[segment]} -> L${aiPolicy[segment]}`)
+    .join(" | ");
+  const suffix = changes.length > 2 ? ` (+${changes.length - 2} more)` : "";
+  return { text: `${preview}${suffix}`, changedCount: changes.length };
 }
 
 function buildQueueTimeline(params: { naiveWeeklyIncidents: number; aiWeeklyIncidents: number }): QueueTimeline {
@@ -260,7 +267,6 @@ export function Home(): JSX.Element {
   const [error, setError] = useState<UiError | null>(null);
   const [replayTick, setReplayTick] = useState(0);
   const [timelineMinute, setTimelineMinute] = useState(0);
-  const [timelinePlaying, setTimelinePlaying] = useState(true);
 
   const runAnalysis = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -329,15 +335,19 @@ export function Home(): JSX.Element {
     const successLift = aiProjection.successes - naiveProjection.successes;
     const incidentsAvoided = naiveProjection.incidents - aiProjection.incidents;
     const riskCostImpactUsd = naiveProjection.riskCostUsd - aiProjection.riskCostUsd;
-    const changeSummary = buildChangeSummary(naivePolicy, aiPolicy);
+    const actionSummary = buildActionSummary(naivePolicy, aiPolicy);
+    const candidatesEvaluated = results.dr.dose_response.reduce(
+      (count, segment) => count + segment.points.filter((point) => point.policy_level <= MAX_POLICY_LEVEL).length,
+      0
+    );
 
     return {
-      recommendationLine: `Ship bias-adjusted policy (${changeSummary}): ${formatSignedInteger(successLift)} successful outcomes, ${formatSignedInteger(
-        incidentsAvoided
-      )} incidents avoided, ${formatSignedCurrency(riskCostImpactUsd)} weekly risk impact vs naive.`,
+      recommendationLine: `Apply now: ${actionSummary.text}.`,
       successLift,
       incidentsAvoided,
       riskCostImpactUsd,
+      changedSegments: actionSummary.changedCount,
+      candidatesEvaluated,
       aiPolicy,
       naivePolicy,
       aiProjection,
@@ -357,42 +367,51 @@ export function Home(): JSX.Element {
   }, [score]);
 
   const storyLine = useMemo(() => {
-    if (!queueTimeline) {
+    if (!queueTimeline || !score) {
       return "Auto-running policy search...";
     }
 
     if (queueTimeline.naiveBreachMinute !== null && queueTimeline.aiBreachMinute === null) {
-      return `In a 12-minute incident surge, naive routing breaches SLO at m${queueTimeline.naiveBreachMinute} while bias-adjusted policy stays stable.`;
+      return `AI reweighted biased logs and tested ${score.candidatesEvaluated} actions: naive breaches SLO at m${queueTimeline.naiveBreachMinute}, AI stays stable.`;
     }
 
     if (queueTimeline.naiveBreachMinute !== null && queueTimeline.aiBreachMinute !== null) {
-      return `In a 12-minute incident surge, bias-adjusted policy delays SLO breach from m${queueTimeline.naiveBreachMinute} to m${queueTimeline.aiBreachMinute}.`;
+      return `AI reweighted biased logs and tested ${score.candidatesEvaluated} actions: SLO breach shifts from m${queueTimeline.naiveBreachMinute} to m${queueTimeline.aiBreachMinute}.`;
     }
 
-    return `In a 12-minute incident surge, bias-adjusted policy keeps queue lower than naive routing under the same capacity.`;
+    return `AI reweighted biased logs and tested ${score.candidatesEvaluated} actions: queue stays lower than naive under the same capacity.`;
+  }, [queueTimeline, score]);
+
+  const outcomeLine = useMemo(() => {
+    if (!queueTimeline) {
+      return "Computing timeline...";
+    }
+    if (queueTimeline.naiveBreachMinute !== null && queueTimeline.aiBreachMinute === null) {
+      return `Outcome: Naive breaches at m${queueTimeline.naiveBreachMinute}. AI stays below SLO ${queueTimeline.sloThreshold}.`;
+    }
+    if (queueTimeline.naiveBreachMinute !== null && queueTimeline.aiBreachMinute !== null) {
+      return `Outcome: Breach delayed from m${queueTimeline.naiveBreachMinute} to m${queueTimeline.aiBreachMinute}.`;
+    }
+    return `Outcome: Both stay below SLO ${queueTimeline.sloThreshold}; AI queue remains lower.`;
   }, [queueTimeline]);
 
   useEffect(() => {
     if (!queueTimeline) {
       setTimelineMinute(0);
-      setTimelinePlaying(false);
+      return;
+    }
+  }, [queueTimeline, replayTick]);
+
+  useEffect(() => {
+    if (!queueTimeline) {
       return;
     }
 
     setTimelineMinute(0);
-    setTimelinePlaying(true);
-  }, [queueTimeline, replayTick]);
-
-  useEffect(() => {
-    if (!queueTimeline || !timelinePlaying) {
-      return;
-    }
-
     const intervalId = window.setInterval(() => {
       setTimelineMinute((current) => {
         if (current >= TIMELINE_TOTAL_MINUTES) {
           window.clearInterval(intervalId);
-          setTimelinePlaying(false);
           return current;
         }
         return current + 1;
@@ -402,7 +421,7 @@ export function Home(): JSX.Element {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [queueTimeline, timelinePlaying]);
+  }, [queueTimeline, replayTick]);
 
   const metricAnimationKey = `${results.dr?.artifact_version ?? "none"}|${replayTick}`;
   const queueAnimationKey = `${metricAnimationKey}|${timelineMinute}`;
@@ -414,6 +433,10 @@ export function Home(): JSX.Element {
   const animatedNaiveQueue = useAnimatedNumber(currentNaiveQueue, `queue-naive|${queueAnimationKey}`, 220);
   const animatedAiQueue = useAnimatedNumber(currentAiQueue, `queue-ai|${queueAnimationKey}`, 220);
   const timelineMaxQueue = Math.max(...(queueTimeline?.naiveQueue ?? [1]), ...(queueTimeline?.aiQueue ?? [1]), 1);
+  const activeStep = Math.min(
+    AI_STEPS.length - 1,
+    Math.floor((timelineMinute / TIMELINE_TOTAL_MINUTES) * AI_STEPS.length)
+  );
 
   return (
     <main className="page-shell" data-testid="home-shell">
@@ -426,7 +449,7 @@ export function Home(): JSX.Element {
 
       {loading ? (
         <p className="status-line" data-testid="status-line">
-          Running counterfactual policy search...
+          Running AI policy search...
         </p>
       ) : null}
 
@@ -445,22 +468,9 @@ export function Home(): JSX.Element {
 
           <section className="impact-strip" data-testid="impact-strip">
             <div className="impact-strip-header">
-              <p className="timeline-headline">Minute-by-minute queue stabilization</p>
+              <p className="timeline-headline">AI run (auto)</p>
               <div className="timeline-actions">
                 <p className="timeline-minute" data-testid="timeline-minute">{`m${timelineMinute}`}</p>
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={() => {
-                    if (!timelinePlaying && timelineMinute >= TIMELINE_TOTAL_MINUTES) {
-                      setTimelineMinute(0);
-                    }
-                    setTimelinePlaying((prev) => !prev);
-                  }}
-                  data-testid="timeline-play-toggle"
-                >
-                  {timelinePlaying ? "Pause" : "Play"}
-                </button>
                 <button
                   type="button"
                   className="text-button"
@@ -470,6 +480,18 @@ export function Home(): JSX.Element {
                   Replay
                 </button>
               </div>
+            </div>
+
+            <div className="step-strip" data-testid="ai-steps">
+              {AI_STEPS.map((step, index) => (
+                <span
+                  key={step}
+                  className={`step-pill ${index <= activeStep ? "active" : ""}`}
+                  data-testid={`ai-step-${index}`}
+                >
+                  {step}
+                </span>
+              ))}
             </div>
 
             <div className="timeline-rows" data-testid="timeline-chart">
@@ -512,34 +534,24 @@ export function Home(): JSX.Element {
               </article>
             </div>
 
-            <input
-              type="range"
-              min={0}
-              max={TIMELINE_TOTAL_MINUTES}
-              step={1}
-              value={timelineMinute}
-              onChange={(event) => {
-                setTimelineMinute(Number(event.target.value));
-                setTimelinePlaying(false);
-              }}
-              data-testid="timeline-scrubber"
-            />
-            <p className="slo-line" data-testid="timeline-slo">{`SLO threshold: ${queueTimeline?.sloThreshold ?? 0}`}</p>
+            <p className="slo-line" data-testid="timeline-slo">
+              {outcomeLine}
+            </p>
           </section>
 
           <div className="kpi-row">
             <article className="kpi-card" data-testid="kpi-success">
-              <p>Successful outcomes / week</p>
+              <p>Extra successful responses</p>
               <strong>{formatSignedInteger(animatedSuccessLift)}</strong>
             </article>
 
             <article className="kpi-card" data-testid="kpi-incidents">
-              <p>Incidents avoided / week</p>
+              <p>Incidents avoided</p>
               <strong>{formatSignedInteger(animatedIncidentsAvoided)}</strong>
             </article>
 
             <article className="kpi-card" data-testid="kpi-risk-cost">
-              <p>Risk cost impact / week</p>
+              <p>Risk cost saved</p>
               <strong>{formatSignedCurrency(animatedRiskCost)}</strong>
             </article>
           </div>
