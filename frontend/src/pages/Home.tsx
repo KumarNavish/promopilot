@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, DoseResponsePoint, Objective, RecommendResponse, SegmentBy, recommendPolicy } from "../api/client";
+import { ApiError, DoseResponsePoint, RecommendResponse, SegmentBy, recommendPolicy } from "../api/client";
 
 interface UiError {
   message: string;
@@ -9,7 +9,6 @@ interface UiError {
 interface MethodRollup {
   successes: number;
   incidents: number;
-  safeValue: number;
 }
 
 interface PolicyProjection {
@@ -25,29 +24,9 @@ interface QueueTimeline {
   sloThreshold: number;
   naiveBreachMinute: number | null;
   aiBreachMinute: number | null;
-  naiveArrivalPerMin: number;
-  aiArrivalPerMin: number;
-  capacityPerMin: number;
-  initialBacklog: number;
 }
 
 type PolicyMap = Record<string, number>;
-
-type OperatingMode = "reliability" | "throughput";
-type Horizon = "week" | "quarter" | "year";
-
-interface ModeConfig {
-  label: string;
-  objective: Objective;
-  maxPolicyLevel: number;
-  incidentPenalty: number;
-}
-
-interface HorizonConfig {
-  label: string;
-  kpiPrefix: string;
-  weeks: number;
-}
 
 interface ImpactScore {
   recommendationLine: string;
@@ -61,44 +40,15 @@ interface ImpactScore {
 }
 
 const DEMO_SEGMENT_BY: SegmentBy = "task_domain";
-const DEFAULT_WEEKLY_REQUESTS = 5_000_000;
-const DEFAULT_INCIDENT_COST_USD = 2500;
+const OBJECTIVE = "task_success" as const;
+const MAX_POLICY_LEVEL = 2;
+const INCIDENT_PENALTY = 4;
+const WEEKLY_REQUESTS = 5_000_000;
+const INCIDENT_COST_USD = 2500;
 const MINUTES_PER_WEEK = 7 * 24 * 60;
 const TIMELINE_TOTAL_MINUTES = 12;
 const TIMELINE_TICK_MS = 420;
-
-const MODE_CONFIGS: Record<OperatingMode, ModeConfig> = {
-  reliability: {
-    label: "Reliability first",
-    objective: "task_success",
-    maxPolicyLevel: 2,
-    incidentPenalty: 4
-  },
-  throughput: {
-    label: "Throughput first",
-    objective: "task_success",
-    maxPolicyLevel: 3,
-    incidentPenalty: 1
-  }
-};
-
-const HORIZON_CONFIGS: Record<Horizon, HorizonConfig> = {
-  week: {
-    label: "1 week",
-    kpiPrefix: "Weekly",
-    weeks: 1
-  },
-  quarter: {
-    label: "1 quarter",
-    kpiPrefix: "Quarterly",
-    weeks: 13
-  },
-  year: {
-    label: "1 year",
-    kpiPrefix: "Annual",
-    weeks: 52
-  }
-};
+const SURGE_MULTIPLIER = 40;
 
 function formatInteger(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -126,26 +76,26 @@ function cleanSegment(segment: string): string {
   return segment.replace("Domain=", "").replace(/_/g, " ");
 }
 
-function objectiveValue(point: DoseResponsePoint, objective: Objective): number {
-  return objective === "safe_value" ? point.safe_value_per_10k : point.successes_per_10k;
+function objectiveValue(point: DoseResponsePoint): number {
+  return point.successes_per_10k;
 }
 
-function utility(point: DoseResponsePoint, objective: Objective, incidentPenalty: number): number {
-  return objectiveValue(point, objective) - incidentPenalty * point.incidents_per_10k;
+function utility(point: DoseResponsePoint): number {
+  return objectiveValue(point) - INCIDENT_PENALTY * point.incidents_per_10k;
 }
 
-function optimizePolicy(response: RecommendResponse, objective: Objective, maxPolicyLevel: number, incidentPenalty: number): PolicyMap {
+function optimizePolicy(response: RecommendResponse): PolicyMap {
   const policy: PolicyMap = {};
 
   for (const segment of response.dose_response) {
-    const candidates = segment.points.filter((point) => point.policy_level <= maxPolicyLevel);
+    const candidates = segment.points.filter((point) => point.policy_level <= MAX_POLICY_LEVEL);
     if (candidates.length === 0) {
       continue;
     }
 
     let best = candidates[0];
     for (const point of candidates.slice(1)) {
-      if (utility(point, objective, incidentPenalty) > utility(best, objective, incidentPenalty)) {
+      if (utility(point) > utility(best)) {
         best = point;
       }
     }
@@ -159,7 +109,6 @@ function optimizePolicy(response: RecommendResponse, objective: Objective, maxPo
 function evaluatePolicy(response: RecommendResponse, policy: PolicyMap): MethodRollup {
   let successes = 0;
   let incidents = 0;
-  let safeValue = 0;
   let count = 0;
 
   for (const segment of response.dose_response) {
@@ -171,37 +120,38 @@ function evaluatePolicy(response: RecommendResponse, policy: PolicyMap): MethodR
 
     successes += selected.successes_per_10k;
     incidents += selected.incidents_per_10k;
-    safeValue += selected.safe_value_per_10k;
     count += 1;
   }
 
   const safeCount = Math.max(count, 1);
   return {
     successes: successes / safeCount,
-    incidents: incidents / safeCount,
-    safeValue: safeValue / safeCount
+    incidents: incidents / safeCount
   };
 }
 
-function buildPolicyPhrase(policy: PolicyMap): string {
-  return Object.entries(policy)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([segment, level]) => `${cleanSegment(segment)}: L${level}`)
-    .join(", ");
+function buildChangeSummary(naivePolicy: PolicyMap, aiPolicy: PolicyMap): string {
+  const changes = Object.keys(aiPolicy)
+    .sort((a, b) => a.localeCompare(b))
+    .filter((segment) => naivePolicy[segment] !== aiPolicy[segment]);
+
+  if (changes.length === 0) {
+    return "0 segment changes";
+  }
+
+  const segment = changes[0];
+  return `${changes.length} segment changes (e.g., ${cleanSegment(segment)} L${naivePolicy[segment]} -> L${aiPolicy[segment]})`;
 }
 
-function buildQueueTimeline(params: {
-  naiveWeeklyIncidents: number;
-  aiWeeklyIncidents: number;
-  capacityMultiplier: number;
-}): QueueTimeline {
-  const { naiveWeeklyIncidents, aiWeeklyIncidents, capacityMultiplier } = params;
+function buildQueueTimeline(params: { naiveWeeklyIncidents: number; aiWeeklyIncidents: number }): QueueTimeline {
+  const { naiveWeeklyIncidents, aiWeeklyIncidents } = params;
   const minutes = Array.from({ length: TIMELINE_TOTAL_MINUTES + 1 }, (_, minute) => minute);
-  const naiveArrivalPerMin = naiveWeeklyIncidents / MINUTES_PER_WEEK;
-  const aiArrivalPerMin = aiWeeklyIncidents / MINUTES_PER_WEEK;
-  const capacityPerMin = Math.max(0.0001, naiveArrivalPerMin * capacityMultiplier);
-  const initialBacklog = Math.max(1, Math.round(Math.max(naiveArrivalPerMin, aiArrivalPerMin) * 3));
-  const sloThreshold = Math.max(5, Math.round(initialBacklog + Math.max(naiveArrivalPerMin, aiArrivalPerMin) * 10));
+
+  const naiveArrivalPerMin = Math.max(0.2, (naiveWeeklyIncidents / MINUTES_PER_WEEK) * SURGE_MULTIPLIER);
+  const aiArrivalPerMin = Math.max(0.1, (aiWeeklyIncidents / MINUTES_PER_WEEK) * SURGE_MULTIPLIER);
+  const capacityPerMin = aiArrivalPerMin + (naiveArrivalPerMin - aiArrivalPerMin) * 0.45;
+  const initialBacklog = Math.max(8, Math.round(naiveArrivalPerMin * 1.8));
+  const sloThreshold = Math.max(initialBacklog + 12, Math.round(initialBacklog + naiveArrivalPerMin * 5));
 
   let naiveQueue = initialBacklog;
   let aiQueue = initialBacklog;
@@ -225,11 +175,7 @@ function buildQueueTimeline(params: {
     aiQueue: aiQueueSeries,
     sloThreshold,
     naiveBreachMinute: naiveBreachIndex >= 0 ? naiveBreachIndex : null,
-    aiBreachMinute: aiBreachIndex >= 0 ? aiBreachIndex : null,
-    naiveArrivalPerMin,
-    aiArrivalPerMin,
-    capacityPerMin,
-    initialBacklog
+    aiBreachMinute: aiBreachIndex >= 0 ? aiBreachIndex : null
   };
 }
 
@@ -274,32 +220,19 @@ function useAnimatedNumber(target: number, animationKey: string, durationMs = 65
   return value;
 }
 
-function exportPolicyBundle(params: {
-  dr: RecommendResponse;
-  score: ImpactScore;
-  mode: OperatingMode;
-  horizon: Horizon;
-  weeklyRequests: number;
-  incidentCostUsd: number;
-}): void {
-  const { dr, score, mode, horizon, weeklyRequests, incidentCostUsd } = params;
-  const modeConfig = MODE_CONFIGS[mode];
-  const horizonConfig = HORIZON_CONFIGS[horizon];
+function exportPolicyBundle(params: { dr: RecommendResponse; score: ImpactScore }): void {
+  const { dr, score } = params;
 
   const bundle = {
     generated_at_utc: new Date().toISOString(),
     artifact_version: dr.artifact_version,
     scenario: {
-      mode,
-      mode_label: modeConfig.label,
-      horizon,
-      horizon_label: horizonConfig.label,
-      objective: modeConfig.objective,
+      objective: OBJECTIVE,
       segment_by: DEMO_SEGMENT_BY,
-      max_policy_level: modeConfig.maxPolicyLevel,
-      incident_penalty: modeConfig.incidentPenalty,
-      weekly_requests: weeklyRequests,
-      incident_cost_usd: incidentCostUsd
+      max_policy_level: MAX_POLICY_LEVEL,
+      incident_penalty: INCIDENT_PENALTY,
+      weekly_requests: WEEKLY_REQUESTS,
+      incident_cost_usd: INCIDENT_COST_USD
     },
     recommendation: score.recommendationLine,
     impact_vs_naive: {
@@ -322,20 +255,12 @@ function exportPolicyBundle(params: {
 }
 
 export function Home(): JSX.Element {
-  const [mode, setMode] = useState<OperatingMode>("reliability");
-  const [horizon, setHorizon] = useState<Horizon>("week");
-  const [weeklyRequests, setWeeklyRequests] = useState<number>(DEFAULT_WEEKLY_REQUESTS);
-  const [incidentCostUsd, setIncidentCostUsd] = useState<number>(DEFAULT_INCIDENT_COST_USD);
-  const [capacityMultiplier, setCapacityMultiplier] = useState<number>(1.0);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<{ naive?: RecommendResponse; dr?: RecommendResponse }>({});
   const [error, setError] = useState<UiError | null>(null);
   const [replayTick, setReplayTick] = useState(0);
   const [timelineMinute, setTimelineMinute] = useState(0);
   const [timelinePlaying, setTimelinePlaying] = useState(true);
-
-  const modeConfig = MODE_CONFIGS[mode];
-  const horizonConfig = HORIZON_CONFIGS[horizon];
 
   const runAnalysis = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -344,14 +269,14 @@ export function Home(): JSX.Element {
     try {
       const [naive, dr] = await Promise.all([
         recommendPolicy({
-          objective: modeConfig.objective,
-          max_policy_level: modeConfig.maxPolicyLevel,
+          objective: OBJECTIVE,
+          max_policy_level: MAX_POLICY_LEVEL,
           segment_by: DEMO_SEGMENT_BY,
           method: "naive"
         }),
         recommendPolicy({
-          objective: modeConfig.objective,
-          max_policy_level: modeConfig.maxPolicyLevel,
+          objective: OBJECTIVE,
+          max_policy_level: MAX_POLICY_LEVEL,
           segment_by: DEMO_SEGMENT_BY,
           method: "dr"
         })
@@ -370,16 +295,9 @@ export function Home(): JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, [modeConfig.maxPolicyLevel, modeConfig.objective]);
+  }, []);
 
-  const autoRunRef = useRef(false);
   useEffect(() => {
-    if (!autoRunRef.current) {
-      autoRunRef.current = true;
-      void runAnalysis();
-      return;
-    }
-
     void runAnalysis();
   }, [runAnalysis]);
 
@@ -388,40 +306,35 @@ export function Home(): JSX.Element {
       return null;
     }
 
-    const naivePolicy = optimizePolicy(results.naive, modeConfig.objective, modeConfig.maxPolicyLevel, modeConfig.incidentPenalty);
-    const aiPolicy = optimizePolicy(results.dr, modeConfig.objective, modeConfig.maxPolicyLevel, modeConfig.incidentPenalty);
+    const naivePolicy = optimizePolicy(results.naive);
+    const aiPolicy = optimizePolicy(results.dr);
 
     const naiveEvalByDr = evaluatePolicy(results.dr, naivePolicy);
     const aiEvalByDr = evaluatePolicy(results.dr, aiPolicy);
 
-    const trafficFactor = (weeklyRequests / 10_000) * horizonConfig.weeks;
+    const trafficFactor = WEEKLY_REQUESTS / 10_000;
 
     const naiveProjection: PolicyProjection = {
       successes: naiveEvalByDr.successes * trafficFactor,
       incidents: naiveEvalByDr.incidents * trafficFactor,
-      riskCostUsd: naiveEvalByDr.incidents * trafficFactor * incidentCostUsd
+      riskCostUsd: naiveEvalByDr.incidents * trafficFactor * INCIDENT_COST_USD
     };
 
     const aiProjection: PolicyProjection = {
       successes: aiEvalByDr.successes * trafficFactor,
       incidents: aiEvalByDr.incidents * trafficFactor,
-      riskCostUsd: aiEvalByDr.incidents * trafficFactor * incidentCostUsd
+      riskCostUsd: aiEvalByDr.incidents * trafficFactor * INCIDENT_COST_USD
     };
 
     const successLift = aiProjection.successes - naiveProjection.successes;
     const incidentsAvoided = naiveProjection.incidents - aiProjection.incidents;
     const riskCostImpactUsd = naiveProjection.riskCostUsd - aiProjection.riskCostUsd;
-
-    const policyPhrase = buildPolicyPhrase(aiPolicy);
-    const incidentPhrase =
-      incidentsAvoided >= 0
-        ? `${formatInteger(incidentsAvoided)} fewer incidents`
-        : `${formatInteger(Math.abs(incidentsAvoided))} additional incidents`;
+    const changeSummary = buildChangeSummary(naivePolicy, aiPolicy);
 
     return {
-      recommendationLine: `Ship now: ${policyPhrase}. In ${horizonConfig.label}, this bias-adjusted policy projects ${formatSignedInteger(
-        successLift
-      )} successful outcomes with ${incidentPhrase} vs naive targeting.`,
+      recommendationLine: `Ship bias-adjusted policy (${changeSummary}): ${formatSignedInteger(successLift)} successful outcomes, ${formatSignedInteger(
+        incidentsAvoided
+      )} incidents avoided, ${formatSignedCurrency(riskCostImpactUsd)} weekly risk impact vs naive.`,
       successLift,
       incidentsAvoided,
       riskCostImpactUsd,
@@ -430,23 +343,34 @@ export function Home(): JSX.Element {
       aiProjection,
       naiveProjection
     };
-  }, [horizonConfig.label, horizonConfig.weeks, incidentCostUsd, modeConfig.incidentPenalty, modeConfig.maxPolicyLevel, modeConfig.objective, results.dr, results.naive, weeklyRequests]);
+  }, [results.dr, results.naive]);
 
-  const animationKey = `${mode}|${horizon}|${weeklyRequests}|${incidentCostUsd}|${replayTick}`;
   const queueTimeline = useMemo<QueueTimeline | null>(() => {
     if (!score) {
       return null;
     }
 
-    const naiveWeeklyIncidents = score.naiveProjection.incidents / horizonConfig.weeks;
-    const aiWeeklyIncidents = score.aiProjection.incidents / horizonConfig.weeks;
-
     return buildQueueTimeline({
-      naiveWeeklyIncidents,
-      aiWeeklyIncidents,
-      capacityMultiplier
+      naiveWeeklyIncidents: score.naiveProjection.incidents,
+      aiWeeklyIncidents: score.aiProjection.incidents
     });
-  }, [capacityMultiplier, horizonConfig.weeks, score]);
+  }, [score]);
+
+  const storyLine = useMemo(() => {
+    if (!queueTimeline) {
+      return "Auto-running policy search...";
+    }
+
+    if (queueTimeline.naiveBreachMinute !== null && queueTimeline.aiBreachMinute === null) {
+      return `In a 12-minute incident surge, naive routing breaches SLO at m${queueTimeline.naiveBreachMinute} while bias-adjusted policy stays stable.`;
+    }
+
+    if (queueTimeline.naiveBreachMinute !== null && queueTimeline.aiBreachMinute !== null) {
+      return `In a 12-minute incident surge, bias-adjusted policy delays SLO breach from m${queueTimeline.naiveBreachMinute} to m${queueTimeline.aiBreachMinute}.`;
+    }
+
+    return `In a 12-minute incident surge, bias-adjusted policy keeps queue lower than naive routing under the same capacity.`;
+  }, [queueTimeline]);
 
   useEffect(() => {
     if (!queueTimeline) {
@@ -457,7 +381,7 @@ export function Home(): JSX.Element {
 
     setTimelineMinute(0);
     setTimelinePlaying(true);
-  }, [animationKey, queueTimeline]);
+  }, [queueTimeline, replayTick]);
 
   useEffect(() => {
     if (!queueTimeline || !timelinePlaying) {
@@ -480,108 +404,29 @@ export function Home(): JSX.Element {
     };
   }, [queueTimeline, timelinePlaying]);
 
-  const animatedSuccessLift = useAnimatedNumber(score?.successLift ?? 0, animationKey);
-  const animatedIncidentsAvoided = useAnimatedNumber(score?.incidentsAvoided ?? 0, animationKey);
-  const animatedRiskCost = useAnimatedNumber(score?.riskCostImpactUsd ?? 0, animationKey);
+  const metricAnimationKey = `${results.dr?.artifact_version ?? "none"}|${replayTick}`;
+  const queueAnimationKey = `${metricAnimationKey}|${timelineMinute}`;
+  const animatedSuccessLift = useAnimatedNumber(score?.successLift ?? 0, `kpi-success|${metricAnimationKey}`);
+  const animatedIncidentsAvoided = useAnimatedNumber(score?.incidentsAvoided ?? 0, `kpi-incidents|${metricAnimationKey}`);
+  const animatedRiskCost = useAnimatedNumber(score?.riskCostImpactUsd ?? 0, `kpi-risk|${metricAnimationKey}`);
   const currentNaiveQueue = queueTimeline ? queueTimeline.naiveQueue[timelineMinute] : 0;
   const currentAiQueue = queueTimeline ? queueTimeline.aiQueue[timelineMinute] : 0;
-  const animatedNaiveQueue = useAnimatedNumber(currentNaiveQueue ?? 0, `${animationKey}|minute-${timelineMinute}|naive`, 230);
-  const animatedAiQueue = useAnimatedNumber(currentAiQueue ?? 0, `${animationKey}|minute-${timelineMinute}|ai`, 230);
+  const animatedNaiveQueue = useAnimatedNumber(currentNaiveQueue, `queue-naive|${queueAnimationKey}`, 220);
+  const animatedAiQueue = useAnimatedNumber(currentAiQueue, `queue-ai|${queueAnimationKey}`, 220);
   const timelineMaxQueue = Math.max(...(queueTimeline?.naiveQueue ?? [1]), ...(queueTimeline?.aiQueue ?? [1]), 1);
-  const breachBadge = queueTimeline
-    ? queueTimeline.naiveBreachMinute === null && queueTimeline.aiBreachMinute === null
-      ? `SLO safe (<= ${queueTimeline.sloThreshold})`
-      : queueTimeline.naiveBreachMinute !== null && queueTimeline.aiBreachMinute === null
-        ? `Naive breaches @ m${queueTimeline.naiveBreachMinute}`
-        : queueTimeline.naiveBreachMinute !== null && queueTimeline.aiBreachMinute !== null
-          ? `Breach delta: ${formatSignedInteger(queueTimeline.aiBreachMinute - queueTimeline.naiveBreachMinute)} min`
-          : `AI breaches @ m${queueTimeline.aiBreachMinute}`
-    : "";
-  const queueDelta = formatSignedInteger(currentNaiveQueue - currentAiQueue);
-
-  const weeklyRequestsMillions = weeklyRequests / 1_000_000;
 
   return (
     <main className="page-shell" data-testid="home-shell">
       <header className="hero">
-        <p className="eyebrow">Counterfactual policy runner</p>
-        <h1>One-click AI policy optimizer</h1>
-        <p className="hero-copy" data-testid="single-story">
-          Auto-runs on load and outputs the policy to ship.
+        <h1>AI incident policy optimizer</h1>
+        <p className="single-story" data-testid="single-story">
+          {storyLine}
         </p>
       </header>
 
-      <section className="controls" data-testid="controls">
-        <div className="field">
-          <p className="field-label">Mode</p>
-          <div className="mode-toggle" role="tablist" aria-label="Operating mode">
-            {(["reliability", "throughput"] as OperatingMode[]).map((option) => (
-              <button
-                key={option}
-                type="button"
-                className={`mode-pill ${mode === option ? "active" : ""}`}
-                onClick={() => setMode(option)}
-                data-testid={`mode-${option}`}
-              >
-                {MODE_CONFIGS[option].label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="field">
-          <p className="field-label">Horizon</p>
-          <div className="mode-toggle" role="tablist" aria-label="Time horizon">
-            {(["week", "quarter", "year"] as Horizon[]).map((option) => (
-              <button
-                key={option}
-                type="button"
-                className={`mode-pill ${horizon === option ? "active" : ""}`}
-                onClick={() => setHorizon(option)}
-                data-testid={`horizon-${option}`}
-              >
-                {HORIZON_CONFIGS[option].label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="field">
-          <label className="field-label" htmlFor="weekly-requests">
-            Traffic: {weeklyRequestsMillions.toFixed(1)}M/wk
-          </label>
-          <input
-            id="weekly-requests"
-            type="range"
-            min={1}
-            max={15}
-            step={0.5}
-            value={weeklyRequestsMillions}
-            onChange={(event) => setWeeklyRequests(Math.round(Number(event.target.value) * 1_000_000))}
-            data-testid="weekly-slider"
-          />
-        </div>
-
-        <div className="field span-two">
-          <label className="field-label" htmlFor="incident-cost">
-            Incident cost: ${formatInteger(incidentCostUsd)}
-          </label>
-          <input
-            id="incident-cost"
-            type="range"
-            min={500}
-            max={6000}
-            step={250}
-            value={incidentCostUsd}
-            onChange={(event) => setIncidentCostUsd(Number(event.target.value))}
-            data-testid="incident-cost-slider"
-          />
-        </div>
-      </section>
-
       {loading ? (
         <p className="status-line" data-testid="status-line">
-          AI is recomputing policy with counterfactual correction...
+          Running counterfactual policy search...
         </p>
       ) : null}
 
@@ -600,14 +445,12 @@ export function Home(): JSX.Element {
 
           <section className="impact-strip" data-testid="impact-strip">
             <div className="impact-strip-header">
-              <div className="timeline-title">
-                <p>12-min queue simulation</p>
-                <p className="timeline-summary" data-testid="timeline-minute">{`m${timelineMinute} | delta ${queueDelta}`}</p>
-              </div>
+              <p className="timeline-headline">Minute-by-minute queue stabilization</p>
               <div className="timeline-actions">
+                <p className="timeline-minute" data-testid="timeline-minute">{`m${timelineMinute}`}</p>
                 <button
                   type="button"
-                  className="replay-button"
+                  className="text-button"
                   onClick={() => {
                     if (!timelinePlaying && timelineMinute >= TIMELINE_TOTAL_MINUTES) {
                       setTimelineMinute(0);
@@ -616,37 +459,22 @@ export function Home(): JSX.Element {
                   }}
                   data-testid="timeline-play-toggle"
                 >
-                  {timelinePlaying ? "Pause timeline" : "Play timeline"}
+                  {timelinePlaying ? "Pause" : "Play"}
                 </button>
                 <button
                   type="button"
-                  className="replay-button"
+                  className="text-button"
                   onClick={() => setReplayTick((prev) => prev + 1)}
                   data-testid="replay-simulation"
                 >
-                  Replay simulation
+                  Replay
                 </button>
               </div>
-            </div>
-            <div className="timeline-controls">
-              <label className="field-label" htmlFor="timeline-capacity">
-                Capacity x{capacityMultiplier.toFixed(2)}
-              </label>
-              <input
-                id="timeline-capacity"
-                type="range"
-                min={0.8}
-                max={1.2}
-                step={0.01}
-                value={capacityMultiplier}
-                onChange={(event) => setCapacityMultiplier(Number(event.target.value))}
-                data-testid="timeline-capacity-slider"
-              />
             </div>
 
             <div className="timeline-rows" data-testid="timeline-chart">
               <article className="timeline-row naive" data-testid="naive-card">
-                <p className="timeline-label">Naive queue</p>
+                <p className="timeline-label">Naive</p>
                 <div className="timeline-track" aria-hidden="true">
                   {queueTimeline?.minutes.map((minute, index) => {
                     const queue = queueTimeline.naiveQueue[index];
@@ -665,7 +493,7 @@ export function Home(): JSX.Element {
               </article>
 
               <article className="timeline-row ai" data-testid="ai-card">
-                <p className="timeline-label">Bias-adjusted queue</p>
+                <p className="timeline-label">Bias-adjusted</p>
                 <div className="timeline-track" aria-hidden="true">
                   {queueTimeline?.minutes.map((minute, index) => {
                     const queue = queueTimeline.aiQueue[index];
@@ -684,12 +512,6 @@ export function Home(): JSX.Element {
               </article>
             </div>
 
-            <div className="timeline-chips" data-testid="timeline-math">
-              <span>{`naive in ${queueTimeline?.naiveArrivalPerMin.toFixed(2)}/m`}</span>
-              <span>{`ai in ${queueTimeline?.aiArrivalPerMin.toFixed(2)}/m`}</span>
-              <span>{`cap ${queueTimeline?.capacityPerMin.toFixed(2)}/m`}</span>
-              <span>{`SLO ${breachBadge}`}</span>
-            </div>
             <input
               type="range"
               min={0}
@@ -702,21 +524,22 @@ export function Home(): JSX.Element {
               }}
               data-testid="timeline-scrubber"
             />
+            <p className="slo-line" data-testid="timeline-slo">{`SLO threshold: ${queueTimeline?.sloThreshold ?? 0}`}</p>
           </section>
 
           <div className="kpi-row">
             <article className="kpi-card" data-testid="kpi-success">
-              <p>{horizonConfig.kpiPrefix} successful outcomes vs naive</p>
+              <p>Successful outcomes / week</p>
               <strong>{formatSignedInteger(animatedSuccessLift)}</strong>
             </article>
 
             <article className="kpi-card" data-testid="kpi-incidents">
-              <p>{horizonConfig.kpiPrefix} incidents avoided vs naive</p>
+              <p>Incidents avoided / week</p>
               <strong>{formatSignedInteger(animatedIncidentsAvoided)}</strong>
             </article>
 
             <article className="kpi-card" data-testid="kpi-risk-cost">
-              <p>{horizonConfig.kpiPrefix} risk cost impact</p>
+              <p>Risk cost impact / week</p>
               <strong>{formatSignedCurrency(animatedRiskCost)}</strong>
             </article>
           </div>
@@ -727,11 +550,7 @@ export function Home(): JSX.Element {
             onClick={() =>
               exportPolicyBundle({
                 dr: results.dr!,
-                score,
-                mode,
-                horizon,
-                weeklyRequests,
-                incidentCostUsd
+                score
               })
             }
             data-testid="apply-policy"
