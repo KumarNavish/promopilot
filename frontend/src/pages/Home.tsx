@@ -452,10 +452,10 @@ export function Home(): JSX.Element {
 
   const storyLine = useMemo(() => {
     if (!score) {
-      return "Observed picks vs AI picks.";
+      return "Biased logs hide the best policy.";
     }
 
-    return "Observed picks in red. AI corrected picks in green.";
+    return "Biased logs can cause wrong policy picks. AI corrects picks to cut incidents and lift success.";
   }, [score]);
 
   const metricAnimationKey = `${results.dr?.artifact_version ?? "none"}|${replayTick}|${activeIndex}`;
@@ -467,6 +467,9 @@ export function Home(): JSX.Element {
   const animatedAiSuccess = useAnimatedNumber(score?.aiSuccessPer10k ?? 0, `ai-success|${metricAnimationKey}`);
   const animatedActiveSuccessGain = useAnimatedNumber(activeDecision?.successGainPer10k ?? 0, `row-success|${metricAnimationKey}`);
   const animatedActiveIncidentGain = useAnimatedNumber(activeDecision?.incidentsAvoidedPer10k ?? 0, `row-incidents|${metricAnimationKey}`);
+  const maxBiasMagnitude = Math.max(...(score?.decisionRows.map((row) => Math.abs(row.biasAtNaive)) ?? [1]), 1e-9);
+  const activeBiasMagnitude = Math.abs(activeDecision?.biasAtNaive ?? 0);
+  const activeBiasPct = (activeBiasMagnitude / maxBiasMagnitude) * 100;
   const incidentScale = Math.max(score?.naiveIncidentPer10k ?? 0, score?.aiIncidentPer10k ?? 0, 1);
   const successScale = Math.max(score?.naiveSuccessPer10k ?? 0, score?.aiSuccessPer10k ?? 0, 1);
   const currentIncidentBar = ((score?.naiveIncidentPer10k ?? 0) / incidentScale) * 100;
@@ -506,6 +509,35 @@ export function Home(): JSX.Element {
 
       {score && results.dr && activeDecision ? (
         <section className="result-panel" data-testid="results-block">
+          <section className="mission-rail" data-testid="mission-rail">
+            <article className="mission-card problem" data-testid="mission-problem">
+              <p>Problem</p>
+              <strong>Biased history</strong>
+              <div className="mission-meter">
+                <i style={{ width: `${Math.max(10, activeBiasPct)}%` }} />
+              </div>
+            </article>
+
+            <article className="mission-card action" data-testid="mission-action">
+              <p>AI action</p>
+              <strong>{activeDecision.naivePick === activeDecision.aiPick ? "Validate pick" : "Switch pick"}</strong>
+              <div className="mission-swap">
+                <span>{policyLevelAxis(activeDecision.naivePick)}</span>
+                <span>→</span>
+                <span>{policyLevelAxis(activeDecision.aiPick)}</span>
+              </div>
+            </article>
+
+            <article className="mission-card value" data-testid="mission-value">
+              <p>Usefulness</p>
+              <strong>Safer and higher success</strong>
+              <div className="mission-delta">
+                <span className={animatedActiveSuccessGain >= 0 ? "good" : "bad"}>{`Success ${formatSignedNumber(animatedActiveSuccessGain)}`}</span>
+                <span className={animatedActiveIncidentGain >= 0 ? "good" : "bad"}>{`Incidents ${formatIncidentDelta(animatedActiveIncidentGain)}`}</span>
+              </div>
+            </article>
+          </section>
+
           <p className="policy-line" data-testid="policy-line">
             <span>Ship now:</span> {score.policyLine}
           </p>

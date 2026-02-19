@@ -9,7 +9,11 @@ test("auto demo run shows visual AI policy learning and operational impact", asy
   await expect(page.getByTestId("controls")).toHaveCount(0);
 
   await expect(page.getByTestId("results-block")).toBeVisible();
-  await expect(page.getByTestId("hero-story")).toContainText("Observed picks");
+  await expect(page.getByTestId("hero-story")).toContainText("Biased logs");
+  await expect(page.getByTestId("mission-rail")).toBeVisible();
+  await expect(page.getByTestId("mission-problem")).toContainText("Problem");
+  await expect(page.getByTestId("mission-action")).toContainText("AI action");
+  await expect(page.getByTestId("mission-value")).toContainText("Usefulness");
   await expect(page.getByTestId("spotlight")).toBeVisible();
   await expect(page.getByTestId("lane-observed")).toBeVisible();
   await expect(page.getByTestId("lane-corrected")).toBeVisible();
