@@ -11,12 +11,6 @@ interface MethodRollup {
   incidents: number;
 }
 
-interface PolicyProjection {
-  successes: number;
-  incidents: number;
-  riskCostUsd: number;
-}
-
 interface SegmentVisual {
   segment: string;
   levels: number[];
@@ -34,23 +28,18 @@ type PolicyMap = Record<string, number>;
 
 interface ImpactScore {
   policyLine: string;
-  successLift: number;
-  incidentsAvoided: number;
   candidatesEvaluated: number;
   changedSegments: number;
-  incidentDeltaPct: number;
-  onCallDeltaPct: number;
-  riskDeltaPct: number;
+  totalSegments: number;
+  changeSharePct: number;
+  incidentsAvoidedPer10k: number;
+  successGainPer10k: number;
   aiPolicy: PolicyMap;
   naivePolicy: PolicyMap;
-  aiProjection: PolicyProjection;
-  naiveProjection: PolicyProjection;
-  naiveIncidents: number;
-  aiIncidents: number;
-  naiveOnCallHours: number;
-  aiOnCallHours: number;
-  naiveRiskCost: number;
-  aiRiskCost: number;
+  naiveIncidentPer10k: number;
+  aiIncidentPer10k: number;
+  naiveSuccessPer10k: number;
+  aiSuccessPer10k: number;
   segmentVisuals: SegmentVisual[];
 }
 
@@ -58,9 +47,6 @@ const DEMO_SEGMENT_BY: SegmentBy = "task_domain";
 const OBJECTIVE = "task_success" as const;
 const MAX_POLICY_LEVEL = 2;
 const INCIDENT_PENALTY = 4;
-const WEEKLY_REQUESTS = 5_000_000;
-const INCIDENT_COST_USD = 2500;
-const TRIAGE_MINUTES_PER_INCIDENT = 8;
 const PHASES = ["Logs", "Debias", "Search", "Ship"] as const;
 const FRAMES_PER_PHASE = 18;
 const TOTAL_FRAMES = PHASES.length * FRAMES_PER_PHASE - 1;
@@ -72,17 +58,13 @@ function formatInteger(value: number): string {
   }).format(value);
 }
 
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0
-  }).format(value);
-}
-
 function formatSignedPercent(value: number): string {
   const rounded = Math.round(value * 10) / 10;
   return `${rounded >= 0 ? "+" : "-"}${Math.abs(rounded).toFixed(1)}%`;
+}
+
+function formatSignedNumber(value: number): string {
+  return `${value >= 0 ? "+" : "-"}${formatInteger(Math.round(Math.abs(value)))}`;
 }
 
 function cleanSegment(segment: string): string {
@@ -282,19 +264,18 @@ function exportPolicyBundle(params: { dr: RecommendResponse; score: ImpactScore 
       objective: OBJECTIVE,
       segment_by: DEMO_SEGMENT_BY,
       max_policy_level: MAX_POLICY_LEVEL,
-      incident_penalty: INCIDENT_PENALTY,
-      weekly_requests: WEEKLY_REQUESTS,
-      incident_cost_usd: INCIDENT_COST_USD,
-      triage_minutes_per_incident: TRIAGE_MINUTES_PER_INCIDENT
+      incident_penalty: INCIDENT_PENALTY
     },
     policy_line: score.policyLine,
-    metrics_weekly: {
-      incidents_before: Math.round(score.naiveIncidents),
-      incidents_after: Math.round(score.aiIncidents),
-      on_call_hours_before: Math.round(score.naiveOnCallHours * 10) / 10,
-      on_call_hours_after: Math.round(score.aiOnCallHours * 10) / 10,
-      risk_cost_before_usd: Math.round(score.naiveRiskCost),
-      risk_cost_after_usd: Math.round(score.aiRiskCost)
+    metrics_per_10k: {
+      incidents_before: Math.round(score.naiveIncidentPer10k),
+      incidents_after: Math.round(score.aiIncidentPer10k),
+      successes_before: Math.round(score.naiveSuccessPer10k),
+      successes_after: Math.round(score.aiSuccessPer10k)
+    },
+    policy_changes: {
+      changed_segments: score.changedSegments,
+      total_segments: score.totalSegments
     },
     recommended_rules: policyToRules(score.aiPolicy),
     naive_reference_rules: policyToRules(score.naivePolicy)
@@ -367,20 +348,6 @@ export function Home(): JSX.Element {
     const naiveEvalByDr = evaluatePolicy(results.dr, naivePolicy);
     const aiEvalByDr = evaluatePolicy(results.dr, aiPolicy);
 
-    const trafficFactor = WEEKLY_REQUESTS / 10_000;
-
-    const naiveProjection: PolicyProjection = {
-      successes: naiveEvalByDr.successes * trafficFactor,
-      incidents: naiveEvalByDr.incidents * trafficFactor,
-      riskCostUsd: naiveEvalByDr.incidents * trafficFactor * INCIDENT_COST_USD
-    };
-
-    const aiProjection: PolicyProjection = {
-      successes: aiEvalByDr.successes * trafficFactor,
-      incidents: aiEvalByDr.incidents * trafficFactor,
-      riskCostUsd: aiEvalByDr.incidents * trafficFactor * INCIDENT_COST_USD
-    };
-
     const segmentVisuals = buildSegmentVisuals({
       naive: results.naive,
       dr: results.dr,
@@ -389,36 +356,30 @@ export function Home(): JSX.Element {
     });
 
     const candidatesEvaluated = segmentVisuals.reduce((count, row) => count + row.levels.length, 0);
+    const totalSegments = segmentVisuals.length;
     const changedSegments = segmentVisuals.filter((row) => row.naivePick !== row.aiPick).length;
-    const naiveIncidents = naiveProjection.incidents;
-    const aiIncidents = aiProjection.incidents;
-    const naiveOnCallHours = (naiveIncidents * TRIAGE_MINUTES_PER_INCIDENT) / 60;
-    const aiOnCallHours = (aiIncidents * TRIAGE_MINUTES_PER_INCIDENT) / 60;
-    const naiveRiskCost = naiveProjection.riskCostUsd;
-    const aiRiskCost = aiProjection.riskCostUsd;
-    const incidentDeltaPct = naiveIncidents > 0 ? ((aiIncidents - naiveIncidents) / naiveIncidents) * 100 : 0;
-    const onCallDeltaPct = naiveOnCallHours > 0 ? ((aiOnCallHours - naiveOnCallHours) / naiveOnCallHours) * 100 : 0;
-    const riskDeltaPct = naiveRiskCost > 0 ? ((aiRiskCost - naiveRiskCost) / naiveRiskCost) * 100 : 0;
+    const naiveIncidentPer10k = naiveEvalByDr.incidents;
+    const aiIncidentPer10k = aiEvalByDr.incidents;
+    const naiveSuccessPer10k = naiveEvalByDr.successes;
+    const aiSuccessPer10k = aiEvalByDr.successes;
+    const incidentsAvoidedPer10k = naiveIncidentPer10k - aiIncidentPer10k;
+    const successGainPer10k = aiSuccessPer10k - naiveSuccessPer10k;
+    const changeSharePct = totalSegments > 0 ? (changedSegments / totalSegments) * 100 : 0;
 
     return {
       policyLine: buildPolicyLine(aiPolicy),
-      successLift: aiProjection.successes - naiveProjection.successes,
-      incidentsAvoided: naiveIncidents - aiIncidents,
       candidatesEvaluated,
       changedSegments,
-      incidentDeltaPct,
-      onCallDeltaPct,
-      riskDeltaPct,
+      totalSegments,
+      changeSharePct,
+      incidentsAvoidedPer10k,
+      successGainPer10k,
       aiPolicy,
       naivePolicy,
-      aiProjection,
-      naiveProjection,
-      naiveIncidents,
-      aiIncidents,
-      naiveOnCallHours,
-      aiOnCallHours,
-      naiveRiskCost,
-      aiRiskCost,
+      naiveIncidentPer10k,
+      aiIncidentPer10k,
+      naiveSuccessPer10k,
+      aiSuccessPer10k,
       segmentVisuals
     };
   }, [results.dr, results.naive]);
@@ -446,23 +407,19 @@ export function Home(): JSX.Element {
   }, [score, replayTick]);
 
   const metricAnimationKey = `${results.dr?.artifact_version ?? "none"}|${replayTick}`;
-  const animatedAiIncidents = useAnimatedNumber(score?.aiIncidents ?? 0, `incidents|${metricAnimationKey}`);
-  const animatedAiOnCallHours = useAnimatedNumber(score?.aiOnCallHours ?? 0, `oncall|${metricAnimationKey}`);
-  const animatedAiRiskCost = useAnimatedNumber(score?.aiRiskCost ?? 0, `risk|${metricAnimationKey}`);
-  const animatedIncidentDeltaPct = useAnimatedNumber(score?.incidentDeltaPct ?? 0, `incident-delta|${metricAnimationKey}`);
-  const animatedOnCallDeltaPct = useAnimatedNumber(score?.onCallDeltaPct ?? 0, `oncall-delta|${metricAnimationKey}`);
-  const animatedRiskDeltaPct = useAnimatedNumber(score?.riskDeltaPct ?? 0, `risk-delta|${metricAnimationKey}`);
+  const animatedAiIncidents = useAnimatedNumber(score?.aiIncidentPer10k ?? 0, `incidents|${metricAnimationKey}`);
+  const animatedAiSuccess = useAnimatedNumber(score?.aiSuccessPer10k ?? 0, `success|${metricAnimationKey}`);
+  const animatedChangedSegments = useAnimatedNumber(score?.changedSegments ?? 0, `changes|${metricAnimationKey}`);
+  const animatedIncidentsAvoided = useAnimatedNumber(score?.incidentsAvoidedPer10k ?? 0, `incidents-avoided|${metricAnimationKey}`);
+  const animatedSuccessGain = useAnimatedNumber(score?.successGainPer10k ?? 0, `success-gain|${metricAnimationKey}`);
+  const animatedChangeSharePct = useAnimatedNumber(score?.changeSharePct ?? 0, `change-share|${metricAnimationKey}`);
   const animatedIncidentRatio = useAnimatedNumber(
-    ratioPercent(score?.aiIncidents ?? 0, score?.naiveIncidents ?? 1),
+    ratioPercent(score?.aiIncidentPer10k ?? 0, score?.naiveIncidentPer10k ?? 1),
     `incident-ratio|${metricAnimationKey}`
   );
-  const animatedOnCallRatio = useAnimatedNumber(
-    ratioPercent(score?.aiOnCallHours ?? 0, score?.naiveOnCallHours ?? 1),
-    `oncall-ratio|${metricAnimationKey}`
-  );
-  const animatedRiskRatio = useAnimatedNumber(
-    ratioPercent(score?.aiRiskCost ?? 0, score?.naiveRiskCost ?? 1),
-    `risk-ratio|${metricAnimationKey}`
+  const animatedSuccessRatio = useAnimatedNumber(
+    ratioPercent(score?.aiSuccessPer10k ?? 0, score?.naiveSuccessPer10k ?? 1),
+    `success-ratio|${metricAnimationKey}`
   );
 
   const activePhase = Math.min(PHASES.length - 1, Math.floor(frame / FRAMES_PER_PHASE));
@@ -502,6 +459,10 @@ export function Home(): JSX.Element {
 
       {score && results.dr ? (
         <section className="result-panel" data-testid="results-block">
+          <p className="policy-line" data-testid="policy-line">
+            <span>Ship now:</span> {score.policyLine}
+          </p>
+
           <div className="phase-strip" data-testid="phase-strip">
             {PHASES.map((phase, index) => (
               <span
@@ -518,17 +479,18 @@ export function Home(): JSX.Element {
             <span><i className="key-token bias" />bias</span>
             <span><i className="key-token bar-naive" />observed</span>
             <span><i className="key-token bar-ai" />corrected</span>
-            <span><i className="key-token dot-naive" />naive pick</span>
-            <span><i className="key-token dot-ai" />ai pick</span>
+            <span><i className="key-token status-wrong">x</i>wrong pick</span>
+            <span><i className="key-token status-right">v</i>shipped</span>
           </div>
 
           <section className="decision-film" data-testid="decision-film">
             <div className="film-head">
               <span />
-              <span className="film-col">Biased</span>
+              <span className="film-col">Observed (biased logs)</span>
               <span className="film-col" />
-              <span className="film-col">Corrected</span>
+              <span className="film-col">AI corrected estimate</span>
             </div>
+            <p className="film-note">bar height = utility (success - 4 x incidents)</p>
 
             {score.segmentVisuals.map((row) => {
               const naivePickIndex = row.levels.indexOf(row.naivePick);
@@ -561,7 +523,7 @@ export function Home(): JSX.Element {
                           />
                         ) : null}
                         {row.naivePick === level && row.naivePick !== row.aiPick ? (
-                          <span className="lane-status wrong" />
+                          <span className="lane-status wrong">x</span>
                         ) : null}
                       </span>
                     ))}
@@ -579,7 +541,7 @@ export function Home(): JSX.Element {
                           style={{ height: `${22 + row.drNorm[index] * 70}%` }}
                         />
                         {row.aiPick === level ? <span className="lane-dot ai" style={{ opacity: aiPickOpacity }} /> : null}
-                        {row.aiPick === level ? <span className="lane-status right" style={{ opacity: aiPickOpacity }} /> : null}
+                        {row.aiPick === level ? <span className="lane-status right" style={{ opacity: aiPickOpacity }}>v</span> : null}
                       </span>
                     ))}
                   </div>
@@ -603,40 +565,42 @@ export function Home(): JSX.Element {
             </div>
           </section>
 
+          <p className="kpi-source">Bottom numbers are computed from selected bars above.</p>
+
           <div className="kpi-row">
+            <article className="kpi-card" data-testid="kpi-changes">
+              <p>Wrong picks fixed</p>
+              <strong>{`${Math.round(animatedChangedSegments)} / ${score.totalSegments}`}</strong>
+              <div className="kpi-meter">
+                <span className="kpi-baseline" />
+                <span className="kpi-current" style={{ width: `${Math.min(100, Math.max(0, animatedChangeSharePct))}%` }} />
+              </div>
+              <small className={score.changedSegments > 0 ? "good" : "bad"}>
+                {`${formatSignedPercent(animatedChangeSharePct)} of segments switched`}
+              </small>
+            </article>
+
             <article className="kpi-card" data-testid="kpi-incidents">
-              <p>Incidents</p>
-              <strong>{formatSignedPercent(animatedIncidentDeltaPct)}</strong>
+              <p>Incidents avoided / 10k</p>
+              <strong>{formatSignedNumber(animatedIncidentsAvoided)}</strong>
               <div className="kpi-meter">
                 <span className="kpi-baseline" />
                 <span className="kpi-current" style={{ width: `${Math.min(130, Math.max(0, animatedIncidentRatio))}%` }} />
               </div>
-              <small className={animatedAiIncidents <= score.naiveIncidents ? "good" : "bad"}>
-                {`${formatInteger(score.naiveIncidents)} -> ${formatInteger(animatedAiIncidents)}`}
+              <small className={animatedAiIncidents <= score.naiveIncidentPer10k ? "good" : "bad"}>
+                {`${formatInteger(score.naiveIncidentPer10k)} -> ${formatInteger(animatedAiIncidents)}`}
               </small>
             </article>
 
-            <article className="kpi-card" data-testid="kpi-oncall">
-              <p>On-call load</p>
-              <strong>{formatSignedPercent(animatedOnCallDeltaPct)}</strong>
+            <article className="kpi-card" data-testid="kpi-success">
+              <p>Success gain / 10k</p>
+              <strong>{formatSignedNumber(animatedSuccessGain)}</strong>
               <div className="kpi-meter">
                 <span className="kpi-baseline" />
-                <span className="kpi-current" style={{ width: `${Math.min(130, Math.max(0, animatedOnCallRatio))}%` }} />
+                <span className="kpi-current" style={{ width: `${Math.min(130, Math.max(0, animatedSuccessRatio))}%` }} />
               </div>
-              <small className={animatedAiOnCallHours <= score.naiveOnCallHours ? "good" : "bad"}>
-                {`${Math.round(score.naiveOnCallHours)}h -> ${Math.round(animatedAiOnCallHours)}h`}
-              </small>
-            </article>
-
-            <article className="kpi-card" data-testid="kpi-risk-cost">
-              <p>Risk cost</p>
-              <strong>{formatSignedPercent(animatedRiskDeltaPct)}</strong>
-              <div className="kpi-meter">
-                <span className="kpi-baseline" />
-                <span className="kpi-current" style={{ width: `${Math.min(130, Math.max(0, animatedRiskRatio))}%` }} />
-              </div>
-              <small className={animatedAiRiskCost <= score.naiveRiskCost ? "good" : "bad"}>
-                {`${formatCurrency(score.naiveRiskCost)} -> ${formatCurrency(animatedAiRiskCost)}`}
+              <small className={animatedAiSuccess >= score.naiveSuccessPer10k ? "good" : "bad"}>
+                {`${formatInteger(score.naiveSuccessPer10k)} -> ${formatInteger(animatedAiSuccess)}`}
               </small>
             </article>
           </div>
