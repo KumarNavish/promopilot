@@ -22,6 +22,8 @@ interface SegmentVisual {
   levels: number[];
   naiveUtilities: number[];
   drUtilities: number[];
+  biasGap: number[];
+  biasNorm: number[];
   naiveNorm: number[];
   drNorm: number[];
   naivePick: number;
@@ -201,12 +203,17 @@ function buildSegmentVisuals(params: {
     });
 
     const drUtilities = drPoints.map((point) => utility(point));
+    const biasGap = levels.map((_, index) => naiveUtilities[index] - drUtilities[index]);
+    const biasAbsMax = Math.max(...biasGap.map((value) => Math.abs(value)), 1e-9);
+    const biasNorm = biasGap.map((value) => Math.abs(value) / biasAbsMax);
 
     visuals.push({
       segment: segment.segment,
       levels,
       naiveUtilities,
       drUtilities,
+      biasGap,
+      biasNorm,
       naiveNorm: normalize(naiveUtilities),
       drNorm: normalize(drUtilities),
       naivePick: naivePolicy[segment.segment] ?? levels[0],
@@ -465,6 +472,8 @@ export function Home(): JSX.Element {
   const showNaivePick = activePhase >= 2;
   const aiPickOpacity = activePhase < 2 ? 0 : activePhase === 2 ? phaseProgress : 1;
   const displayLevels = score?.segmentVisuals[0]?.levels ?? [0, 1, 2];
+  const maxDisplayLevel = Math.max(...displayLevels, 1);
+  const biasOverlayStrength = activePhase === 0 ? 0 : activePhase === 1 ? phaseProgress : activePhase === 2 ? 0.62 : 0.44;
   const boardColumns = `minmax(130px, 1.6fr) repeat(${displayLevels.length}, minmax(58px, 1fr))`;
 
   return (
@@ -523,9 +532,16 @@ export function Home(): JSX.Element {
                   const naiveHeight = 18 + row.naiveNorm[index] * 82;
                   const drHeight = 18 + row.drNorm[index] * 82;
                   const aiWin = row.aiPick === level && activePhase >= 3;
+                  const biasIsOverestimate = row.biasGap[index] > 0;
+                  const biasOpacity = row.biasNorm[index] * biasOverlayStrength;
+                  const biasColor = biasIsOverestimate ? "225, 29, 72" : "14, 165, 233";
 
                   return (
                     <div key={`${row.segment}-${level}`} className={`utility-cell ${aiWin ? "ai-win" : ""}`}>
+                      <span
+                        className="bias-layer"
+                        style={{ backgroundColor: `rgba(${biasColor}, ${biasOpacity})` }}
+                      />
                       <span
                         className="utility-fill naive"
                         style={{ height: `${naiveHeight}%`, opacity: naiveOpacity }}
@@ -542,6 +558,40 @@ export function Home(): JSX.Element {
                 })}
               </div>
             ))}
+          </section>
+
+          <section className="switch-board" data-testid="switch-board">
+            {score.segmentVisuals.map((row) => {
+              const naiveLeft = (row.naivePick / maxDisplayLevel) * 100;
+              const aiLeft = (row.aiPick / maxDisplayLevel) * 100;
+              const linkLeft = Math.min(naiveLeft, aiLeft);
+              const linkWidth = Math.max(1.5, Math.abs(aiLeft - naiveLeft));
+
+              return (
+                <div key={`switch-${row.segment}`} className="switch-row">
+                  <span className="row-label">{cleanSegment(row.segment)}</span>
+                  <div className="switch-track">
+                    {row.levels.map((level) => (
+                      <span
+                        key={`${row.segment}-tick-${level}`}
+                        className="switch-tick"
+                        style={{ left: `${(level / maxDisplayLevel) * 100}%` }}
+                      />
+                    ))}
+                    <span
+                      className="switch-link"
+                      style={{
+                        left: `${linkLeft}%`,
+                        width: `${linkWidth}%`,
+                        opacity: activePhase < 2 ? 0 : activePhase === 2 ? phaseProgress : 1
+                      }}
+                    />
+                    <span className="switch-dot naive" style={{ left: `${naiveLeft}%`, opacity: showNaivePick ? 1 : 0 }} />
+                    <span className="switch-dot ai" style={{ left: `${aiLeft}%`, opacity: aiPickOpacity }} />
+                  </div>
+                </div>
+              );
+            })}
           </section>
 
           <div className="legend" data-testid="legend">
