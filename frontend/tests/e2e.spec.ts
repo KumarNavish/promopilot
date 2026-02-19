@@ -9,15 +9,17 @@ test("auto demo run shows visual AI policy learning and operational impact", asy
   await expect(page.getByTestId("controls")).toHaveCount(0);
 
   await expect(page.getByTestId("results-block")).toBeVisible();
-  await expect(page.getByTestId("hero-story")).toContainText("Biased logs");
+  await expect(page.getByTestId("hero-story")).toContainText("Problem -> AI correction -> business value.");
   await expect(page.getByTestId("mission-rail")).toBeVisible();
   await expect(page.getByTestId("mission-problem")).toContainText("Problem");
   await expect(page.getByTestId("mission-action")).toContainText("AI action");
   await expect(page.getByTestId("mission-value")).toContainText("Usefulness");
+
   await expect(page.getByTestId("spotlight")).toBeVisible();
   await expect(page.getByTestId("lane-observed")).toBeVisible();
   await expect(page.getByTestId("lane-corrected")).toBeVisible();
   await expect(page.getByTestId("decision-swap")).toBeVisible();
+  await expect(page.getByTestId("connector")).toBeVisible();
   await expect(page.getByTestId("segment-tabs")).toBeVisible();
   await expect(page.getByTestId("segment-tab-0")).toBeVisible();
 
@@ -30,10 +32,9 @@ test("auto demo run shows visual AI policy learning and operational impact", asy
   await expect(page.getByTestId("replay-simulation")).toBeVisible();
   await page.getByTestId("replay-simulation").click();
 
-  await expect(page.getByTestId("policy-line")).toContainText("Ship now:");
-  await expect(page.getByTestId("kpi-legend")).toBeVisible();
-  await expect(page.getByTestId("kpi-changes")).toContainText("Policies corrected");
-  await expect(page.getByTestId("kpi-incidents")).toContainText("Incidents / 10k");
-  await expect(page.getByTestId("kpi-success")).toContainText("Success / 10k");
+  await expect(page.getByTestId("impact-board")).toBeVisible();
+  await expect(page.getByTestId("kpi-changes")).toContainText("Delta");
+  await expect(page.getByTestId("kpi-incidents")).toContainText("Current");
+  await expect(page.getByTestId("kpi-success")).toContainText("AI");
   await expect(page.getByTestId("apply-policy")).toBeVisible();
 });

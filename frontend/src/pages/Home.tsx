@@ -19,7 +19,6 @@ interface SegmentDecision {
   naivePick: number;
   aiPick: number;
   biasAtNaive: number;
-  utilityGain: number;
   incidentsAvoidedPer10k: number;
   successGainPer10k: number;
 }
@@ -27,7 +26,6 @@ interface SegmentDecision {
 type PolicyMap = Record<string, number>;
 
 interface ImpactScore {
-  policyLine: string;
   changedSegments: number;
   totalSegments: number;
   changeSharePct: number;
@@ -105,10 +103,6 @@ function objectiveValue(point: DoseResponsePoint): number {
 
 function utility(point: DoseResponsePoint): number {
   return objectiveValue(point) - INCIDENT_PENALTY * point.incidents_per_10k;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }
 
 function normalize(values: number[]): number[] {
@@ -210,6 +204,7 @@ function buildSegmentDecisions(params: {
       const observed = naiveByLevel?.get(level) ?? fallback;
       return utility(observed);
     });
+
     const drUtilities = levels.map((level, index) => {
       const fallback = drPoints[index];
       return utility(drByLevel.get(level) ?? fallback);
@@ -219,11 +214,8 @@ function buildSegmentDecisions(params: {
     const aiPick = aiPolicy[segment.segment] ?? levels[0];
 
     const naivePickIndex = levels.indexOf(naivePick);
-    const aiPickIndex = levels.indexOf(aiPick);
-
     const observedNaiveUtility = naivePickIndex >= 0 ? naiveUtilities[naivePickIndex] : naiveUtilities[0];
     const correctedNaiveUtility = naivePickIndex >= 0 ? drUtilities[naivePickIndex] : drUtilities[0];
-    const correctedAiUtility = aiPickIndex >= 0 ? drUtilities[aiPickIndex] : drUtilities[0];
 
     const drNaivePoint = drByLevel.get(naivePick) ?? drPoints[0];
     const drAiPoint = drByLevel.get(aiPick) ?? drPoints[0];
@@ -236,20 +228,12 @@ function buildSegmentDecisions(params: {
       naivePick,
       aiPick,
       biasAtNaive: observedNaiveUtility - correctedNaiveUtility,
-      utilityGain: correctedAiUtility - correctedNaiveUtility,
       incidentsAvoidedPer10k: drNaivePoint.incidents_per_10k - drAiPoint.incidents_per_10k,
       successGainPer10k: drAiPoint.successes_per_10k - drNaivePoint.successes_per_10k
     });
   }
 
   return rows.sort((a, b) => a.segment.localeCompare(b.segment));
-}
-
-function buildPolicyLine(policy: PolicyMap): string {
-  return Object.entries(policy)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([segment, level]) => `${cleanSegment(segment)} ${policyLevelName(level)}`)
-    .join(" • ");
 }
 
 function policyToRules(policy: PolicyMap): Array<{ segment: string; policy_level: number }> {
@@ -305,7 +289,6 @@ function exportPolicyBundle(params: { dr: RecommendResponse; score: ImpactScore 
       max_policy_level: MAX_POLICY_LEVEL,
       incident_penalty: INCIDENT_PENALTY
     },
-    policy_line: score.policyLine,
     metrics_per_10k: {
       incidents_before: Math.round(score.naiveIncidentPer10k),
       incidents_after: Math.round(score.aiIncidentPer10k),
@@ -408,7 +391,6 @@ export function Home(): JSX.Element {
     const successGainPer10k = aiSuccessPer10k - naiveSuccessPer10k;
 
     return {
-      policyLine: buildPolicyLine(aiPolicy),
       changedSegments,
       totalSegments,
       changeSharePct,
@@ -449,13 +431,13 @@ export function Home(): JSX.Element {
   const activeIndex = manualIndex ?? autoIndex;
   const activeDecision = score?.decisionRows[activeIndex];
   const activeProgress = (frame % FRAMES_PER_SEGMENT) / Math.max(FRAMES_PER_SEGMENT - 1, 1);
+  const revealStage = Math.min(2, Math.floor(activeProgress * 3));
 
   const storyLine = useMemo(() => {
     if (!score) {
       return "Biased logs hide the best policy.";
     }
-
-    return "Biased logs can cause wrong policy picks. AI corrects picks to cut incidents and lift success.";
+    return "Problem -> AI correction -> business value.";
   }, [score]);
 
   const metricAnimationKey = `${results.dr?.artifact_version ?? "none"}|${replayTick}|${activeIndex}`;
@@ -467,16 +449,24 @@ export function Home(): JSX.Element {
   const animatedAiSuccess = useAnimatedNumber(score?.aiSuccessPer10k ?? 0, `ai-success|${metricAnimationKey}`);
   const animatedActiveSuccessGain = useAnimatedNumber(activeDecision?.successGainPer10k ?? 0, `row-success|${metricAnimationKey}`);
   const animatedActiveIncidentGain = useAnimatedNumber(activeDecision?.incidentsAvoidedPer10k ?? 0, `row-incidents|${metricAnimationKey}`);
-  const revealStage = Math.min(2, Math.floor(activeProgress * 3));
+
   const maxBiasMagnitude = Math.max(...(score?.decisionRows.map((row) => Math.abs(row.biasAtNaive)) ?? [1]), 1e-9);
   const activeBiasMagnitude = Math.abs(activeDecision?.biasAtNaive ?? 0);
   const activeBiasPct = (activeBiasMagnitude / maxBiasMagnitude) * 100;
+
   const incidentScale = Math.max(score?.naiveIncidentPer10k ?? 0, score?.aiIncidentPer10k ?? 0, 1);
   const successScale = Math.max(score?.naiveSuccessPer10k ?? 0, score?.aiSuccessPer10k ?? 0, 1);
   const currentIncidentBar = ((score?.naiveIncidentPer10k ?? 0) / incidentScale) * 100;
   const aiIncidentBar = (animatedAiIncidents / incidentScale) * 100;
   const currentSuccessBar = ((score?.naiveSuccessPer10k ?? 0) / successScale) * 100;
   const aiSuccessBar = (animatedAiSuccess / successScale) * 100;
+
+  const naiveIndex = activeDecision ? activeDecision.levels.indexOf(activeDecision.naivePick) : 0;
+  const aiIndex = activeDecision ? activeDecision.levels.indexOf(activeDecision.aiPick) : 0;
+  const levelCount = activeDecision?.levels.length ?? 3;
+  const fromPct = levelCount > 1 ? (naiveIndex / (levelCount - 1)) * 100 : 50;
+  const toPct = levelCount > 1 ? (aiIndex / (levelCount - 1)) * 100 : 50;
+  const connectorLeft = fromPct + (toPct - fromPct) * activeProgress;
 
   return (
     <main className="page-shell" data-testid="home-shell">
@@ -513,7 +503,7 @@ export function Home(): JSX.Element {
           <section className="mission-rail" data-testid="mission-rail">
             <article className={`mission-card problem ${revealStage === 0 ? "active" : ""}`} data-testid="mission-problem">
               <p>Problem</p>
-              <strong>Biased history</strong>
+              <strong>{`${Math.round(animatedChangedSegments)} biased picks`}</strong>
               <div className="mission-meter">
                 <i style={{ width: `${Math.max(10, activeBiasPct)}%` }} />
               </div>
@@ -521,7 +511,7 @@ export function Home(): JSX.Element {
 
             <article className={`mission-card action ${revealStage === 1 ? "active" : ""}`} data-testid="mission-action">
               <p>AI action</p>
-              <strong>{activeDecision.naivePick === activeDecision.aiPick ? "Validate pick" : "Switch pick"}</strong>
+              <strong>{activeDecision.naivePick === activeDecision.aiPick ? "Validate" : "Switch"}</strong>
               <div className="mission-swap">
                 <span>{policyLevelAxis(activeDecision.naivePick)}</span>
                 <span>→</span>
@@ -532,7 +522,7 @@ export function Home(): JSX.Element {
 
             <article className={`mission-card value ${revealStage === 2 ? "active" : ""}`} data-testid="mission-value">
               <p>Usefulness</p>
-              <strong>Safer and higher success</strong>
+              <strong>{formatIncidentNarrative(animatedActiveIncidentGain)}</strong>
               <div className="mission-delta">
                 <span className={animatedActiveSuccessGain >= 0 ? "good" : "bad"}>{`Success ${formatSignedNumber(animatedActiveSuccessGain)}`}</span>
                 <span className={animatedActiveIncidentGain >= 0 ? "good" : "bad"}>{`Incidents ${formatIncidentDelta(animatedActiveIncidentGain)}`}</span>
@@ -540,17 +530,14 @@ export function Home(): JSX.Element {
             </article>
           </section>
 
-          <p className="policy-line" data-testid="policy-line">
-            <span>Ship now:</span> {score.policyLine}
-          </p>
-
-          <section className="spotlight" data-testid="spotlight">
-            <div className="spotlight-head">
-              <span className="spotlight-domain">{cleanSegment(activeDecision.segment)}</span>
-              <span className="spotlight-step" data-testid="spotlight-step">{`Segment ${activeIndex + 1} of ${score.totalSegments}`}</span>
+          <section className="duel" data-testid="spotlight">
+            <div className="duel-head">
+              <span className="duel-segment" data-testid="spotlight-step">
+                {`Segment ${activeIndex + 1} of ${score.totalSegments} • ${cleanSegment(activeDecision.segment)}`}
+              </span>
             </div>
 
-            <div className="spotlight-grid">
+            <div className="duel-grid">
               <article className={`lane-card ${revealStage === 0 ? "focus-problem" : ""}`} data-testid="lane-observed">
                 <p>Observed</p>
                 <div className="lane-bars naive">
@@ -577,6 +564,9 @@ export function Home(): JSX.Element {
                   <span className="swap-arrow">→</span>
                   <span className="policy-chip ai">{policyLevelName(activeDecision.aiPick)}</span>
                 </div>
+                <div className="connector-track" data-testid="connector">
+                  <i className="connector-token" style={{ left: `${connectorLeft}%` }} />
+                </div>
                 <div className="delta-chips">
                   <span className={`delta-chip ${animatedActiveSuccessGain >= 0 ? "good" : "bad"}`}>
                     {`Success ${formatSignedNumber(animatedActiveSuccessGain)}`}
@@ -587,8 +577,8 @@ export function Home(): JSX.Element {
                 </div>
               </article>
 
-              <article className={`lane-card ${revealStage === 1 || revealStage === 2 ? "focus-ai" : ""}`} data-testid="lane-corrected">
-                <p>AI corrected</p>
+              <article className={`lane-card ${revealStage > 0 ? "focus-ai" : ""}`} data-testid="lane-corrected">
+                <p>AI</p>
                 <div className="lane-bars ai" style={{ opacity: 0.62 + activeProgress * 0.38 }}>
                   {activeDecision.levels.map((level, index) => (
                     <span
@@ -600,7 +590,7 @@ export function Home(): JSX.Element {
                         style={{ height: `${24 + activeDecision.drNorm[index] * 66}%` }}
                       />
                       {activeDecision.aiPick === level ? <span className="bar-glow ai" style={{ opacity: 0.45 + activeProgress * 0.55 }} /> : null}
-                      {activeDecision.aiPick === level ? <span className="bar-label ai">AI choice</span> : null}
+                      {activeDecision.aiPick === level ? <span className="bar-label ai">AI</span> : null}
                     </span>
                   ))}
                 </div>
@@ -636,60 +626,44 @@ export function Home(): JSX.Element {
             </div>
           </section>
 
-          <div className="kpi-legend" data-testid="kpi-legend">
-            <span><i className="legend-dot current" />Current</span>
-            <span><i className="legend-dot ai" />AI</span>
-          </div>
+          <section className={`impact-board ${revealStage === 2 ? "active" : ""}`} data-testid="impact-board">
+            <article className="impact-card current" data-testid="kpi-incidents">
+              <p>Current</p>
+              <div className="impact-row">
+                <span>Incidents / 10k</span>
+                <strong>{formatInteger(score.naiveIncidentPer10k)}</strong>
+              </div>
+              <div className="impact-track"><i className="current" style={{ width: `${currentIncidentBar}%` }} /></div>
+              <div className="impact-row">
+                <span>Success / 10k</span>
+                <strong>{formatInteger(score.naiveSuccessPer10k)}</strong>
+              </div>
+              <div className="impact-track"><i className="current" style={{ width: `${currentSuccessBar}%` }} /></div>
+            </article>
 
-          <div className={`kpi-row ${revealStage === 2 ? "value-focus" : ""}`}>
-            <article className="kpi-card" data-testid="kpi-changes">
-              <p>Policies corrected</p>
-              <strong>{`${Math.round(animatedChangedSegments)} of ${score.totalSegments} decisions`}</strong>
+            <article className="impact-card ai" data-testid="kpi-success">
+              <p>AI</p>
+              <div className="impact-row">
+                <span>Incidents / 10k</span>
+                <strong>{formatInteger(animatedAiIncidents)}</strong>
+              </div>
+              <div className="impact-track"><i className="ai" style={{ width: `${aiIncidentBar}%` }} /></div>
+              <div className="impact-row">
+                <span>Success / 10k</span>
+                <strong>{formatInteger(animatedAiSuccess)}</strong>
+              </div>
+              <div className="impact-track"><i className="ai" style={{ width: `${aiSuccessBar}%` }} /></div>
+            </article>
+
+            <article className="impact-card delta" data-testid="kpi-changes">
+              <p>Delta</p>
+              <strong className={animatedIncidentsAvoided >= 0 ? "good" : "bad"}>{formatIncidentNarrative(animatedIncidentsAvoided)}</strong>
+              <strong className={animatedSuccessGain >= 0 ? "good" : "bad"}>{`${formatSignedNumber(animatedSuccessGain)} success / 10k`}</strong>
               <div className="kpi-progress">
                 <i style={{ width: `${Math.round(animatedChangeSharePct)}%` }} />
               </div>
             </article>
-
-            <article className="kpi-card" data-testid="kpi-incidents">
-              <p>Incidents / 10k</p>
-              <div className="kpi-compare">
-                <div className="kpi-compare-row">
-                  <div className="kpi-track">
-                    <i className="current" style={{ width: `${currentIncidentBar}%` }} />
-                  </div>
-                  <strong>{formatInteger(score.naiveIncidentPer10k)}</strong>
-                </div>
-                <div className="kpi-compare-row">
-                  <div className="kpi-track">
-                    <i className="ai" style={{ width: `${aiIncidentBar}%` }} />
-                  </div>
-                  <strong>{formatInteger(animatedAiIncidents)}</strong>
-                </div>
-              </div>
-              <small className={animatedIncidentsAvoided >= 0 ? "good" : "bad"}>{formatIncidentNarrative(animatedIncidentsAvoided)}</small>
-            </article>
-
-            <article className="kpi-card" data-testid="kpi-success">
-              <p>Success / 10k</p>
-              <div className="kpi-compare">
-                <div className="kpi-compare-row">
-                  <div className="kpi-track">
-                    <i className="current" style={{ width: `${currentSuccessBar}%` }} />
-                  </div>
-                  <strong>{formatInteger(score.naiveSuccessPer10k)}</strong>
-                </div>
-                <div className="kpi-compare-row">
-                  <div className="kpi-track">
-                    <i className="ai" style={{ width: `${aiSuccessBar}%` }} />
-                  </div>
-                  <strong>{formatInteger(animatedAiSuccess)}</strong>
-                </div>
-              </div>
-              <small className={animatedSuccessGain >= 0 ? "good" : "bad"}>
-                {`${formatSignedNumber(animatedSuccessGain)} vs current policy`}
-              </small>
-            </article>
-          </div>
+          </section>
 
           <button
             type="button"
