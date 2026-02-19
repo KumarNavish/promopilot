@@ -1,5 +1,5 @@
 {
-  "artifact_version": "2026-02-18",
+  "artifact_version": "2026-02-19",
   "policy_levels": [
     0,
     1,
@@ -9,7 +9,7 @@
   ],
   "recommendations": {
     "safe_value|0|device_tier|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -217,7 +217,7 @@
       "warnings": []
     },
     "safe_value|0|device_tier|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -425,7 +425,7 @@
       "warnings": []
     },
     "safe_value|0|none|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -503,7 +503,7 @@
       "warnings": []
     },
     "safe_value|0|none|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -581,7 +581,7 @@
       "warnings": []
     },
     "safe_value|0|prompt_risk|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -789,7 +789,7 @@
       "warnings": []
     },
     "safe_value|0|prompt_risk|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -997,7 +997,7 @@
       "warnings": []
     },
     "safe_value|0|task_domain|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -1205,7 +1205,7 @@
       "warnings": []
     },
     "safe_value|0|task_domain|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -1413,7 +1413,7 @@
       "warnings": []
     },
     "safe_value|1|device_tier|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -1621,7 +1621,7 @@
       "warnings": []
     },
     "safe_value|1|device_tier|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -1829,7 +1829,7 @@
       "warnings": []
     },
     "safe_value|1|none|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -1907,7 +1907,7 @@
       "warnings": []
     },
     "safe_value|1|none|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -1985,7 +1985,7 @@
       "warnings": []
     },
     "safe_value|1|prompt_risk|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -2193,7 +2193,7 @@
       "warnings": []
     },
     "safe_value|1|prompt_risk|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -2401,7 +2401,7 @@
       "warnings": []
     },
     "safe_value|1|task_domain|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -2609,7 +2609,7 @@
       "warnings": []
     },
     "safe_value|1|task_domain|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -2817,7 +2817,7 @@
       "warnings": []
     },
     "safe_value|2|device_tier|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -3025,7 +3025,7 @@
       "warnings": []
     },
     "safe_value|2|device_tier|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -3233,7 +3233,7 @@
       "warnings": []
     },
     "safe_value|2|none|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -3311,7 +3311,7 @@
       "warnings": []
     },
     "safe_value|2|none|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -3389,7 +3389,7 @@
       "warnings": []
     },
     "safe_value|2|prompt_risk|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -3597,7 +3597,7 @@
       "warnings": []
     },
     "safe_value|2|prompt_risk|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -3805,7 +3805,7 @@
       "warnings": []
     },
     "safe_value|2|task_domain|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -4013,7 +4013,7 @@
       "warnings": []
     },
     "safe_value|2|task_domain|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -4221,7 +4221,7 @@
       "warnings": []
     },
     "safe_value|3|device_tier|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -4429,7 +4429,7 @@
       "warnings": []
     },
     "safe_value|3|device_tier|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -4637,7 +4637,7 @@
       "warnings": []
     },
     "safe_value|3|none|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -4715,7 +4715,7 @@
       "warnings": []
     },
     "safe_value|3|none|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -4793,7 +4793,7 @@
       "warnings": []
     },
     "safe_value|3|prompt_risk|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -5001,7 +5001,7 @@
       "warnings": []
     },
     "safe_value|3|prompt_risk|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -5209,7 +5209,7 @@
       "warnings": []
     },
     "safe_value|3|task_domain|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -5417,7 +5417,7 @@
       "warnings": []
     },
     "safe_value|3|task_domain|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -5625,7 +5625,7 @@
       "warnings": []
     },
     "safe_value|4|device_tier|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -5833,7 +5833,7 @@
       "warnings": []
     },
     "safe_value|4|device_tier|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -6041,7 +6041,7 @@
       "warnings": []
     },
     "safe_value|4|none|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -6119,7 +6119,7 @@
       "warnings": []
     },
     "safe_value|4|none|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -6197,7 +6197,7 @@
       "warnings": []
     },
     "safe_value|4|prompt_risk|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -6405,7 +6405,7 @@
       "warnings": []
     },
     "safe_value|4|prompt_risk|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -6613,7 +6613,7 @@
       "warnings": []
     },
     "safe_value|4|task_domain|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -6821,7 +6821,7 @@
       "warnings": []
     },
     "safe_value|4|task_domain|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -7029,7 +7029,7 @@
       "warnings": []
     },
     "task_success|0|device_tier|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -7237,7 +7237,7 @@
       "warnings": []
     },
     "task_success|0|device_tier|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -7445,7 +7445,7 @@
       "warnings": []
     },
     "task_success|0|none|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -7523,7 +7523,7 @@
       "warnings": []
     },
     "task_success|0|none|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -7601,7 +7601,7 @@
       "warnings": []
     },
     "task_success|0|prompt_risk|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -7809,7 +7809,7 @@
       "warnings": []
     },
     "task_success|0|prompt_risk|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -8017,7 +8017,7 @@
       "warnings": []
     },
     "task_success|0|task_domain|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -8225,7 +8225,7 @@
       "warnings": []
     },
     "task_success|0|task_domain|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -8433,7 +8433,7 @@
       "warnings": []
     },
     "task_success|1|device_tier|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -8641,7 +8641,7 @@
       "warnings": []
     },
     "task_success|1|device_tier|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -8849,7 +8849,7 @@
       "warnings": []
     },
     "task_success|1|none|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -8927,7 +8927,7 @@
       "warnings": []
     },
     "task_success|1|none|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -9005,7 +9005,7 @@
       "warnings": []
     },
     "task_success|1|prompt_risk|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -9213,7 +9213,7 @@
       "warnings": []
     },
     "task_success|1|prompt_risk|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -9421,7 +9421,7 @@
       "warnings": []
     },
     "task_success|1|task_domain|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -9629,7 +9629,7 @@
       "warnings": []
     },
     "task_success|1|task_domain|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -9837,7 +9837,7 @@
       "warnings": []
     },
     "task_success|2|device_tier|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -10045,7 +10045,7 @@
       "warnings": []
     },
     "task_success|2|device_tier|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -10253,7 +10253,7 @@
       "warnings": []
     },
     "task_success|2|none|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -10331,7 +10331,7 @@
       "warnings": []
     },
     "task_success|2|none|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -10409,7 +10409,7 @@
       "warnings": []
     },
     "task_success|2|prompt_risk|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -10617,7 +10617,7 @@
       "warnings": []
     },
     "task_success|2|prompt_risk|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -10825,7 +10825,7 @@
       "warnings": []
     },
     "task_success|2|task_domain|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -11033,7 +11033,7 @@
       "warnings": []
     },
     "task_success|2|task_domain|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -11241,7 +11241,7 @@
       "warnings": []
     },
     "task_success|3|device_tier|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -11449,7 +11449,7 @@
       "warnings": []
     },
     "task_success|3|device_tier|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -11657,7 +11657,7 @@
       "warnings": []
     },
     "task_success|3|none|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -11735,7 +11735,7 @@
       "warnings": []
     },
     "task_success|3|none|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -11813,7 +11813,7 @@
       "warnings": []
     },
     "task_success|3|prompt_risk|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -12021,7 +12021,7 @@
       "warnings": []
     },
     "task_success|3|prompt_risk|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -12229,7 +12229,7 @@
       "warnings": []
     },
     "task_success|3|task_domain|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -12437,7 +12437,7 @@
       "warnings": []
     },
     "task_success|3|task_domain|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -12645,7 +12645,7 @@
       "warnings": []
     },
     "task_success|4|device_tier|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -12853,7 +12853,7 @@
       "warnings": []
     },
     "task_success|4|device_tier|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -13061,7 +13061,7 @@
       "warnings": []
     },
     "task_success|4|none|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -13139,7 +13139,7 @@
       "warnings": []
     },
     "task_success|4|none|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -13217,7 +13217,7 @@
       "warnings": []
     },
     "task_success|4|prompt_risk|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -13425,7 +13425,7 @@
       "warnings": []
     },
     "task_success|4|prompt_risk|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -13633,7 +13633,7 @@
       "warnings": []
     },
     "task_success|4|task_domain|dr": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
@@ -13841,7 +13841,7 @@
       "warnings": []
     },
     "task_success|4|task_domain|naive": {
-      "artifact_version": "2026-02-18",
+      "artifact_version": "2026-02-19",
       "baseline": {
         "name": "current_policy",
         "policy_level": 2
