@@ -11,6 +11,7 @@ test("auto demo run shows visual AI policy learning and operational impact", asy
   await expect(page.getByTestId("results-block")).toBeVisible();
   await expect(page.getByTestId("hero-story")).toContainText("AI corrected");
   await expect(page.getByTestId("spotlight")).toBeVisible();
+  await expect(page.getByTestId("spotlight-guide")).toContainText("Each column is a policy level");
   await expect(page.getByTestId("lane-observed")).toBeVisible();
   await expect(page.getByTestId("lane-corrected")).toBeVisible();
   await expect(page.getByTestId("segment-tabs")).toBeVisible();
@@ -19,7 +20,7 @@ test("auto demo run shows visual AI policy learning and operational impact", asy
   await page.waitForTimeout(900);
   await expect(page.getByTestId("spotlight-step")).toBeVisible();
   await page.getByTestId("segment-tab-1").click();
-  await expect(page.getByTestId("spotlight-step")).toContainText("2/");
+  await expect(page.getByTestId("spotlight-step")).toContainText("Segment 2 of");
   await page.getByTestId("auto-tour").click();
 
   await expect(page.getByTestId("replay-simulation")).toBeVisible();
@@ -27,7 +28,7 @@ test("auto demo run shows visual AI policy learning and operational impact", asy
 
   await expect(page.getByTestId("policy-line")).toContainText("Ship now:");
   await expect(page.getByTestId("kpi-changes")).toContainText("Policies corrected");
-  await expect(page.getByTestId("kpi-incidents")).toContainText("Incidents avoided / 10k");
-  await expect(page.getByTestId("kpi-success")).toContainText("Success gain / 10k");
+  await expect(page.getByTestId("kpi-incidents")).toContainText("Incidents per 10k requests");
+  await expect(page.getByTestId("kpi-success")).toContainText("Successful outcomes per 10k requests");
   await expect(page.getByTestId("apply-policy")).toBeVisible();
 });
