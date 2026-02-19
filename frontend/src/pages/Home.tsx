@@ -514,12 +514,20 @@ export function Home(): JSX.Element {
             ))}
           </div>
 
+          <div className="visual-key" data-testid="visual-key">
+            <span><i className="key-token bias" />bias</span>
+            <span><i className="key-token bar-naive" />observed</span>
+            <span><i className="key-token bar-ai" />corrected</span>
+            <span><i className="key-token dot-naive" />naive pick</span>
+            <span><i className="key-token dot-ai" />ai pick</span>
+          </div>
+
           <section className="decision-film" data-testid="decision-film">
             <div className="film-head">
               <span />
-              <span className="film-col">Naive</span>
+              <span className="film-col">Biased</span>
               <span className="film-col" />
-              <span className="film-col">AI</span>
+              <span className="film-col">Corrected</span>
             </div>
 
             {score.segmentVisuals.map((row) => {
@@ -552,6 +560,9 @@ export function Home(): JSX.Element {
                             }}
                           />
                         ) : null}
+                        {row.naivePick === level && row.naivePick !== row.aiPick ? (
+                          <span className="lane-status wrong" />
+                        ) : null}
                       </span>
                     ))}
                   </div>
@@ -568,6 +579,7 @@ export function Home(): JSX.Element {
                           style={{ height: `${22 + row.drNorm[index] * 70}%` }}
                         />
                         {row.aiPick === level ? <span className="lane-dot ai" style={{ opacity: aiPickOpacity }} /> : null}
+                        {row.aiPick === level ? <span className="lane-status right" style={{ opacity: aiPickOpacity }} /> : null}
                       </span>
                     ))}
                   </div>

@@ -10,6 +10,7 @@ test("auto demo run shows visual AI policy learning and operational impact", asy
 
   await expect(page.getByTestId("results-block")).toBeVisible();
   await expect(page.getByTestId("phase-strip")).toBeVisible();
+  await expect(page.getByTestId("visual-key")).toBeVisible();
   await expect(page.getByTestId("decision-film")).toBeVisible();
 
   await page.waitForTimeout(900);
