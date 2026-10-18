@@ -12,17 +12,19 @@ EdgeAlign-DR is a production-style interactive demo for **multi-level counterfac
 
 ## Monorepo layout
 
-- `/Users/kumar0002/Documents/New project/promopilot/backend`: FastAPI app + synthetic data + training + tests
-- `/Users/kumar0002/Documents/New project/promopilot/frontend`: Vite + React + TypeScript UI + Playwright e2e
-- `/Users/kumar0002/Documents/New project/promopilot/Dockerfile`, `/Users/kumar0002/Documents/New project/promopilot/docker-compose.yml`: single-container deployment
-- `/Users/kumar0002/Documents/New project/promopilot/.github/workflows/pages.yml`: static GitHub Pages deployment
+- `backend`: FastAPI app + synthetic data + training + tests
+- `frontend`: Vite + React + TypeScript UI + Playwright e2e
+- `Dockerfile`, `docker-compose.yml`: single-container deployment
+- `.github/workflows/pages.yml`: static GitHub Pages deployment
 
 ## Local development
+
+Run each command block from the repository root in a separate terminal.
 
 ### Backend
 
 ```bash
-cd /Users/kumar0002/Documents/New project/promopilot/backend
+cd backend
 python3 -m pip install -r requirements-dev.txt
 python3 -m app.ml.train
 python3 -m app.ml.export_static_recommendations
@@ -32,7 +34,7 @@ python3 -m uvicorn app.main:app --reload --port 8000
 ### Frontend
 
 ```bash
-cd /Users/kumar0002/Documents/New project/promopilot/frontend
+cd frontend
 npm install
 npm run dev
 ```
@@ -58,17 +60,21 @@ Example request:
 
 ## Build and test
 
+From the repository root:
+
 ```bash
-cd /Users/kumar0002/Documents/New project/promopilot
 make test
 ```
 
-This runs backend unit tests, static bundle export, frontend build, and frontend e2e.
+This installs dependencies, trains the synthetic model, exports the static bundle,
+runs backend unit tests, builds the frontend, and runs frontend e2e checks.
+For a focused regression, use the corresponding target in `Makefile`.
 
 ## Production-style container
 
+From the repository root:
+
 ```bash
-cd /Users/kumar0002/Documents/New project/promopilot
 docker compose up --build
 ```
 
